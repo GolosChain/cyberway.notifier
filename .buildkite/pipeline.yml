@@ -1,0 +1,16 @@
+steps:
+  - label: ":docker: build docker image"
+    command: ".buildkite/steps/build-image.sh"
+    timeout: 20
+
+  - wait
+
+  - label: ":floppy_disk: upload image"
+    command: ".buildkite/steps/publish-image.sh"
+    timeout: 20
+
+  - wait
+
+  - label: ":docker: build exporter image"
+    command: ".buildkite/steps/build-exporter.sh"
+    timeout: 20
