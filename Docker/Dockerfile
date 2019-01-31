@@ -1,4 +1,4 @@
-FROM cyberway/builder:master
+FROM cyberway/builder:master as builder
 
 ARG branch=master
 
@@ -20,7 +20,20 @@ RUN cd /opt/cyberway.notifier && mkdir build && cd build \
         .. \
     && make
 
+FROM ubuntu:18.04
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/cyberway.notifier/build/cyber-notifier /opt/cyber-notifier
+COPY --from=builder /etc/version.json /opt/cyber-notifier.version
+COPY --from=builder /usr/local/lib/libnats.so.1.8.0 /usr/local/lib/
+COPY --from=builder /opt/cnats-1.8.0/pbuf/lib/linux/libprotobuf-c.so /usr/local/lib/
+
+RUN ldconfig
+
 VOLUME /queue
-WORKDIR /opt/cyberway.notifier/
+WORKDIR /opt
 
 #ENTRYPOINT tail -f -n+0 /queue/msg.txt | /opt/cyberway-notifier/cyber-notifier
