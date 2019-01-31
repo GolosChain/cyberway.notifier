@@ -1,4 +1,5 @@
-FROM cyberway/builder:master as builder
+ARG buildtype=stable
+FROM cyberway/builder:$buildtype as builder
 
 ARG branch=master
 
