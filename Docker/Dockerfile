@@ -27,8 +27,8 @@ RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /opt/cyberway.notifier/build/cyber-notifier /opt/cyber-notifier
-COPY --from=builder /etc/version.json /opt/cyber-notifier.version
+COPY --from=builder /opt/cyberway.notifier/build/cyber-notifier /opt/cyberway/bin/cyber-notifier
+COPY --from=builder /etc/version.json /opt/cyberway/cyber-notifier.version
 COPY --from=builder /usr/local/lib/libnats.so.1.8.0 /usr/local/lib/
 COPY --from=builder /opt/cnats-1.8.0/pbuf/lib/linux/libprotobuf-c.so /usr/local/lib/
 
