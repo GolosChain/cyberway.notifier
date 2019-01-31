@@ -1,0 +1,40 @@
+version: "2.1"
+
+services:
+  nats:
+    container_name: nats-streaming
+    image: nats-streaming:0.11.2-linux
+    restart: always
+    entrypoint: /nats-streaming-server -p 4222 -m 8222 --cluster_id=cyberway
+    ports:
+      - 127.0.0.1:4222:4222
+      - 127.0.0.1:8222:8222
+    networks:
+      - nats-net
+
+  cyberway-notifier:
+    container_name: cyberway-notifier
+    image: cyberway/cyberway-notifier:latest
+    restart: always
+    command: bash -c "tail -f -n+0 /queue/msg.txt | /opt/cyberway.notifier/build/cyber-notifier -s nats://nats-streaming:4222"
+    volumes:
+      - cyberway-queue:/queue:ro
+    networks:
+      - nats-net
+
+  nats-exporter:
+    container_name: nats-exporter
+    image: cyberway/nats-exporter:latest
+    restart: always
+    command: -varz -http_pass=${EXPORTER_PASS} -http_user=${EXPORTER_USER} "http://nats-streaming:8222"
+    ports:
+      - 7777:7777
+    networks:
+      - nats-net
+
+volumes:
+  cyberway-queue:
+    external: true
+
+networks:
+  nats-net:
