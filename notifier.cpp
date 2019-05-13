@@ -2,6 +2,7 @@
 #include "options.h"
 #include <string>
 #include <iostream>
+#include <signal.h>
 
 static const char* usage =
     "-txt           text to send (default is 'hello')\n";
@@ -33,9 +34,15 @@ static void _publish_ack_cb(const char* guid, const char* error, void* closure) 
     // done = true;
 }
 
+static void sigusr1_handler(int signum) {
+    print = !print;
+}
+
 int main(int argc, char** argv) {
     opts = parseArgs(argc, argv, usage);
     std::cout << "Sending pipe messages" << std::endl;
+
+    signal(SIGUSR1, sigusr1_handler);
 
     // Now create STAN Connection Options and set the NATS Options.
     stanConnOptions* connOpts;
@@ -61,7 +68,9 @@ int main(int argc, char** argv) {
             nats_Sleep(50);
             continue;
         } else {
-            std::cout << line << std::endl;
+            if (print) {
+                std::cout << line << std::endl;
+            }
         }
         if (!line.size()) {
             subj = "bad.empty";
