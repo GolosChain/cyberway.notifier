@@ -30,7 +30,7 @@ RUN apt-get update \
 COPY --from=builder /opt/cyberway.notifier/build/cyber-notifier /opt/cyberway/bin/cyber-notifier
 COPY --from=builder /etc/version.json /opt/cyberway/cyber-notifier.version
 COPY --from=builder /usr/local/lib/libnats.so.1.8.0 /usr/local/lib/
-COPY --from=builder /opt/cnats-1.8.0/pbuf/lib/linux/libprotobuf-c.so /usr/local/lib/
+COPY --from=builder /opt/nats.c-1.8.0/pbuf/lib/linux/libprotobuf-c.so /usr/local/lib/
 
 RUN ldconfig
 
