@@ -22,7 +22,7 @@ static volatile bool done = false;
 
 static void _publish_ack_cb(const char* guid, const char* error, void* closure) {
     // TODO: delete object from waiting list, so we can check if some object didn't published for a long time
-    std::cout << "#Ack#, " << guid << std::endl;
+    //std::cout << "#Ack#, " << guid << std::endl;
     // myPubMsgInfo* pubMsg = (myPubMsgInfo*)closure;
     // printf("Ack handler for message ID=%s Data=%.*s GUID=%s - ", pubMsg->ID, pubMsg->size, pubMsg->payload, guid);
     if (error != NULL) {
