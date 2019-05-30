@@ -22,9 +22,10 @@ endif(UNIX)
 
 
 set(outname "cyber-notifier")
+set(PROTOBUF_LIB "/opt/nats.c-1.8.0/pbuf/lib/linux/libprotobuf-c.so")
 
 # Build the executable
 add_executable(${outname} ${PROJECT_SOURCE_DIR}/notifier.cpp)
 
 # Link
-target_link_libraries(${outname} nats ${NATS_EXTRA_LIB})
+target_link_libraries(${outname} nats ${NATS_EXTRA_LIB} ${PROTOBUF_LIB})

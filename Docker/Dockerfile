@@ -4,7 +4,7 @@ FROM cyberway/builder:$buildtype as builder
 ARG branch=master
 
 RUN cd /opt && wget https://github.com/nats-io/cnats/archive/v1.8.0.tar.gz && tar -xzf v1.8.0.tar.gz \
-    && cd cnats-1.8.0 && mkdir build && cd ./build && cmake .. && make && make install
+    && cd nats.c-1.8.0 && mkdir build && cd ./build && cmake .. && make && make install
 
 RUN echo "/opt/cnats-1.8.0/pbuf/lib/linux/" > /etc/ld.so.conf.d/protobuf-c.conf && ldconfig
 
@@ -30,7 +30,7 @@ RUN apt-get update \
 COPY --from=builder /opt/cyberway.notifier/build/cyber-notifier /opt/cyberway/bin/cyber-notifier
 COPY --from=builder /etc/version.json /opt/cyberway/cyber-notifier.version
 COPY --from=builder /usr/local/lib/libnats.so.1.8.0 /usr/local/lib/
-COPY --from=builder /opt/cnats-1.8.0/pbuf/lib/linux/libprotobuf-c.so /usr/local/lib/
+COPY --from=builder /opt/nats.c-1.8.0/pbuf/lib/linux/libprotobuf-c.so /usr/local/lib/
 
 RUN ldconfig
 
