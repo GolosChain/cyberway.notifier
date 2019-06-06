@@ -2,6 +2,7 @@
 #include "options.h"
 #include <string>
 #include <iostream>
+#include <mutex>
 #include <signal.h>
 
 static const char* usage =
@@ -14,6 +15,7 @@ struct myPubMsgInfo {
 };
 
 static volatile bool done = false;
+static std::mutex done_mtx;
 // natsOptions* opts   = NULL;
 // const char* cluster    = "cyberway";
 // const char* clientID   = "notifier";
@@ -26,8 +28,10 @@ static void _publish_ack_cb(const char* guid, const char* error, void* closure) 
     // myPubMsgInfo* pubMsg = (myPubMsgInfo*)closure;
     // printf("Ack handler for message ID=%s Data=%.*s GUID=%s - ", pubMsg->ID, pubMsg->size, pubMsg->payload, guid);
     if (error != NULL) {
+        done_mtx.lock();
         std::cout << "Error: " << error << std::endl;
-        done = true;    // TODO: locking
+        done = true;
+        done_mtx.unlock();
     }
     // free(pubMsg);    // This is a good place to free the pubMsg info since we no longer need it
     // Notify the main thread that we are done. This is not the proper way and you should use some locking.
@@ -60,7 +64,7 @@ int main(int argc, char** argv) {
     stanConnOptions_Destroy(connOpts);
 
     std::string line;
-    while (!done && s == NATS_OK) {
+    while (s == NATS_OK) {
         static const auto start = "{\"msg_type\":\"";   // ok, it's ugly. TODO: ?parse json
         static const auto start_len = strlen(start);
         std::getline(std::cin, line);
@@ -100,12 +104,21 @@ int main(int argc, char** argv) {
         // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
         // if (s != NATS_OK)
         //     free(pubMsg);
+
+        done_mtx.lock();
+        if (done) {
+            done_mtx.unlock();
+            break;
+        }
+        done_mtx.unlock();
     }
 
+    done_mtx.lock();
     if (s != NATS_OK) {
         std::cout << "Error: " << s << " - " << natsStatus_GetText(s) << std::endl;
         nats_PrintLastErrorStack(stderr);
     }
+    done_mtx.unlock();
 
     stanConnection_Destroy(sc);
     // nats_Sleep(50);    // To silence reports of memory still in-use with valgrind.
