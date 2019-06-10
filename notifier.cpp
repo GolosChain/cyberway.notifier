@@ -57,6 +57,9 @@ int main(int argc, char** argv) {
     if (s == NATS_OK) {
         s = natsOptions_SetReconnectWait(opts, 100 /* ms */);
     }
+    if (s == NATS_OK) {
+        s = natsOptions_SetRetryOnFailedConnect(opts, true, NULL, NULL);
+    }
     // Create the Connection using the STAN Connection Options
     stanConnection* sc;
     if (s == NATS_OK) {
