@@ -53,6 +53,9 @@ int main(int argc, char** argv) {
     if (s == NATS_OK) {
         s = stanConnOptions_SetPings(connOpts, 5 /* seconds */, 24 /* maximum missed pings */);
     }
+    if (s == NATS_OK) {
+        s = stanConnOptions_SetPubAckWait(connOpts, 120 * 1000 /* ms */);
+    }
     // Create the Connection using the STAN Connection Options
     stanConnection* sc;
     if (s == NATS_OK) {
@@ -98,7 +101,14 @@ int main(int argc, char** argv) {
         // }
         // if (s == NATS_OK) {
         // s = stanConnection_PublishAsync(sc, subj, pubMsg->payload, pubMsg->size, _pubAckHandler, (void*)pubMsg);
-        s = stanConnection_Publish(sc, subj, line.c_str(), line.size());
+        for (int i = 0; i < 24 * 1000; ++i) {
+            s = stanConnection_Publish(sc, subj, line.c_str(), line.size());
+            if (s == NATS_TIMEOUT) {
+                nats_Sleep(50);
+                continue;
+            }
+            break;
+        }
 
         // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
         // if (s != NATS_OK)
