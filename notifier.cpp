@@ -50,15 +50,8 @@ int main(int argc, char** argv) {
     if (s == NATS_OK) {
         s = stanConnOptions_SetNATSOptions(connOpts, opts);
     }
-    // Set auto-reconnect options
     if (s == NATS_OK) {
-        s = natsOptions_SetMaxReconnect(opts, 100500);
-    }
-    if (s == NATS_OK) {
-        s = natsOptions_SetReconnectWait(opts, 100 /* ms */);
-    }
-    if (s == NATS_OK) {
-        s = natsOptions_SetRetryOnFailedConnect(opts, true, NULL, NULL);
+        s = stanConnOptions_SetPings(connOpts, 5 /* seconds */, 24 /* maximum missed pings */);
     }
     // Create the Connection using the STAN Connection Options
     stanConnection* sc;
