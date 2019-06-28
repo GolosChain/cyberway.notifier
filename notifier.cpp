@@ -29,6 +29,7 @@ static void _publish_ack_cb(const char* guid, const char* error, void* closure) 
         std::cout << "Error: " << error << std::endl;
         done = true;    // TODO: locking
     }
+    delete static_cast<std::string*>(closure); 
     // free(pubMsg);    // This is a good place to free the pubMsg info since we no longer need it
     // Notify the main thread that we are done. This is not the proper way and you should use some locking.
     // done = true;
@@ -65,28 +66,28 @@ int main(int argc, char** argv) {
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
 
-    std::string line;
+    std::string* line = new std::string();
     while (!done && s == NATS_OK) {
         static const auto start = "{\"msg_type\":\"";   // ok, it's ugly. TODO: ?parse json
         static const auto start_len = strlen(start);
-        std::getline(std::cin, line);
+        std::getline(std::cin, *line);
         if (std::cin.eof()) {
             nats_Sleep(50);
             continue;
         } else {
             if (print) {
-                std::cout << line << std::endl;
+                std::cout << *line << std::endl;
             }
         }
-        if (!line.size()) {
+        if (!line->size()) {
             subj = "bad.empty";
-        } else if (0 != line.find(start)) {
+        } else if (0 != line->find(start)) {
             subj = "bad.start";
         } else {
-            auto end = line.find('"', start_len);
+            auto end = line->find('"', start_len);
             subj = std::string::npos == end
                 ? "bad.end"
-                : line.substr(start_len, end - start_len).c_str();  // TODO: there are forbidden symbols in NATS
+                : line->substr(start_len, end - start_len).c_str();  // TODO: there are forbidden symbols in NATS
         }
 
         // TODO: create object to check in ack
@@ -102,7 +103,7 @@ int main(int argc, char** argv) {
         // if (s == NATS_OK) {
         // s = stanConnection_PublishAsync(sc, subj, pubMsg->payload, pubMsg->size, _pubAckHandler, (void*)pubMsg);
         for (int i = 0; i < 24 * 1000; ++i) {
-            s = stanConnection_PublishAsync(sc, subj, line.c_str(), line.size(), _publish_ack_cb, NULL);
+            s = stanConnection_PublishAsync(sc, subj, line->c_str(), line->size(), _publish_ack_cb, static_cast<void*>(line));
             //s = stanConnection_Publish(sc, subj, line.c_str(), line.size());
             if (s == NATS_TIMEOUT) {
                 nats_Sleep(50);
@@ -112,7 +113,8 @@ int main(int argc, char** argv) {
         }
 
         // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
-        // if (s != NATS_OK)
+        if (s != NATS_OK)
+            delete line;
         //     free(pubMsg);
     }
 
