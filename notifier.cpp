@@ -13,26 +13,27 @@ struct myPubMsgInfo {
     char        ID[30];
 };
 
-//static volatile bool done = false;
+static volatile bool done = false;
 // natsOptions* opts   = NULL;
 // const char* cluster    = "cyberway";
 // const char* clientID   = "notifier";
 // const char* subj   = "foo";
 // const char* txt    = "hello";
 
-//static void _publish_ack_cb(const char* guid, const char* error, void* closure) {
+static void _publish_ack_cb(const char* guid, const char* error, void* closure) {
     // TODO: delete object from waiting list, so we can check if some object didn't published for a long time
     //std::cout << "#Ack#, " << guid << std::endl;
     // myPubMsgInfo* pubMsg = (myPubMsgInfo*)closure;
     // printf("Ack handler for message ID=%s Data=%.*s GUID=%s - ", pubMsg->ID, pubMsg->size, pubMsg->payload, guid);
-//    if (error != NULL) {
-//        std::cout << "Error: " << error << std::endl;
-//        done = true;    // TODO: locking
-//    }
+    if (error != NULL) {
+        std::cout << "Error: " << error << std::endl;
+        done = true;    // TODO: locking
+    }
+    delete static_cast<std::pair<std::string, std::string>*>(closure); 
     // free(pubMsg);    // This is a good place to free the pubMsg info since we no longer need it
     // Notify the main thread that we are done. This is not the proper way and you should use some locking.
     // done = true;
-//}
+}
 
 static void sigusr1_handler(int signum) {
     print = !print;
@@ -65,8 +66,8 @@ int main(int argc, char** argv) {
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
 
-    std::string line;
-    while (s == NATS_OK) {
+    while (!done && s == NATS_OK) {
+        std::string line;
         static const auto start = "{\"msg_type\":\"";   // ok, it's ugly. TODO: ?parse json
         static const auto start_len = strlen(start);
         std::getline(std::cin, line);
@@ -88,6 +89,8 @@ int main(int argc, char** argv) {
                 ? "bad.end"
                 : line.substr(start_len, end - start_len).c_str();  // TODO: there are forbidden symbols in NATS
         }
+        std::pair<std::string, std::string>* pubObj = new std::pair<std::string, std::string>(static_cast<std::string>(subj), line);
+        
 
         // TODO: create object to check in ack
         // TODO: cpp
@@ -102,7 +105,10 @@ int main(int argc, char** argv) {
         // if (s == NATS_OK) {
         // s = stanConnection_PublishAsync(sc, subj, pubMsg->payload, pubMsg->size, _pubAckHandler, (void*)pubMsg);
         for (int i = 0; i < 24 * 1000; ++i) {
-            s = stanConnection_Publish(sc, subj, line.c_str(), line.size());
+            if (async)
+                s = stanConnection_PublishAsync(sc, subj, line.c_str(), line.size(), _publish_ack_cb, static_cast<void*>(pubObj));
+            else
+                s = stanConnection_Publish(sc, subj, line.c_str(), line.size());
             if (s == NATS_TIMEOUT) {
                 nats_Sleep(50);
                 continue;
@@ -111,7 +117,8 @@ int main(int argc, char** argv) {
         }
 
         // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
-        // if (s != NATS_OK)
+        if (s != NATS_OK)
+            delete pubObj;
         //     free(pubMsg);
     }
 
