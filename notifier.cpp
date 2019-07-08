@@ -47,9 +47,9 @@ static void sigusr1_handler(int signum) {
 }
 
 static void sig_int_term_handler(int signum) {
-    if (signum == 2)
+    if (signum == SIGINT)
         std::cout << "Interrupt signal (" << signum << ") received." << std::endl;
-    else if (signum == 15)
+    else if (signum == SIGTERM)
         std::cout << "Termination signal (" << signum << ") received." << std::endl;
     done = true;
 }
