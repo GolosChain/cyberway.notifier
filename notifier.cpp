@@ -15,7 +15,6 @@ struct myPubMsgInfo {
 };
 
 static volatile bool done = false;
-bool is_exit = false;
 // natsOptions* opts   = NULL;
 // const char* cluster    = "cyberway";
 // const char* clientID   = "notifier";
@@ -52,7 +51,7 @@ static void sig_int_term_handler(int signum) {
         std::cout << "Interrupt signal (" << signum << ") received." << std::endl;
     else if (signum == 15)
         std::cout << "Termination signal (" << signum << ") received." << std::endl;
-    is_exit = true;
+    done = true;
 }
 
 int main(int argc, char** argv) {
@@ -138,8 +137,6 @@ int main(int argc, char** argv) {
             msg.release();
         }
 
-        if (is_exit)
-            break;
     }
 
     if (s != NATS_OK) {
