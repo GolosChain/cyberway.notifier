@@ -46,11 +46,21 @@ static void sigusr1_handler(int signum) {
     print = !print;
 }
 
+static void sig_int_term_handler(int signum) {
+    if (signum == SIGINT)
+        std::cout << "Interrupt signal (" << signum << ") received." << std::endl;
+    else if (signum == SIGTERM)
+        std::cout << "Termination signal (" << signum << ") received." << std::endl;
+    done = true;
+}
+
 int main(int argc, char** argv) {
     opts = parseArgs(argc, argv, usage);
     std::cout << "Sending pipe messages" << std::endl;
 
     signal(SIGUSR1, sigusr1_handler);
+    signal(SIGINT, sig_int_term_handler);
+    signal(SIGTERM, sig_int_term_handler);
 
     // Now create STAN Connection Options and set the NATS Options.
     stanConnOptions* connOpts;
@@ -126,6 +136,7 @@ int main(int argc, char** argv) {
         if (s == NATS_OK && async) {
             msg.release();
         }
+
     }
 
     if (s != NATS_OK) {
