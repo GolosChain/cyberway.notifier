@@ -23,8 +23,8 @@ static volatile bool done = false;
 
 
 struct message final {
-    std::string subject = "";
-    std::string data = "";
+    std::string subject;
+    std::string data;
 }; // struct message
 
 static void _publish_ack_cb(const char* guid, const char* error, void* closure) {
