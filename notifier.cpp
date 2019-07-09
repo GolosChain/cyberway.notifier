@@ -23,8 +23,8 @@ static volatile bool done = false;
 
 
 struct message final {
-    std::string subject;
-    std::string data;
+    std::string subject = "";
+    std::string data = "";
 }; // struct message
 
 static void _publish_ack_cb(const char* guid, const char* error, void* closure) {
@@ -83,11 +83,18 @@ int main(int argc, char** argv) {
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
 
-    while (!done && s == NATS_OK) {
+    while (s == NATS_OK) {
         auto msg = std::make_unique<message>();
         static const auto start = "{\"msg_type\":\"";   // ok, it's ugly. TODO: ?parse json
         static const auto start_len = strlen(start);
         std::getline(std::cin, msg->data);
+        if (done) {
+            if (msg->data.size()) {
+                std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
+                done = false;
+            } else
+                break;
+        }
         if (std::cin.eof()) {
             nats_Sleep(50);
             continue;
