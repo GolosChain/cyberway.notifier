@@ -100,9 +100,19 @@ int main(int argc, char** argv) {
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
 
-    while (!done && s == NATS_OK) {
+    bool is_warn = false;
+    while (s == NATS_OK) {
         auto msg = std::make_unique<message>();
         std::getline(std::cin, msg->data);
+        if (done) {
+            if (msg->data.size()) {
+                if (!is_warn) {
+                    std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
+                    is_warn = true;
+                }
+            } else
+                break;
+        }
         if (std::cin.eof()) {
             nats_Sleep(50);
             continue;
