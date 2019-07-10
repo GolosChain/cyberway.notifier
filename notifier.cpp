@@ -27,6 +27,23 @@ struct message final {
     std::string data;
 }; // struct message
 
+std::string get_subject(const std::string& data) {
+    std::string subject;
+    static const auto start = "{\"msg_channel\":\"";   // ok, it's ugly. TODO: ?parse json
+    static const auto start_len = strlen(start);
+    if (!data.size()) {
+        subject = "bad.empty";
+    } else if (0 != data.find(start)) {
+        subject = "bad.start";
+    } else {
+        auto end = data.find('"', start_len);
+        subject = std::string::npos == end
+            ? "bad.end"
+            : data.substr(start_len, end - start_len).c_str();  // TODO: there are forbidden symbols in NATS
+    }
+    return subject;
+}
+
 static void _publish_ack_cb(const char* guid, const char* error, void* closure) {
     std::unique_ptr<message> msg(static_cast<message*>(closure));
     // TODO: delete object from waiting list, so we can check if some object didn't published for a long time
@@ -85,8 +102,6 @@ int main(int argc, char** argv) {
 
     while (!done && s == NATS_OK) {
         auto msg = std::make_unique<message>();
-        static const auto start = "{\"msg_type\":\"";   // ok, it's ugly. TODO: ?parse json
-        static const auto start_len = strlen(start);
         std::getline(std::cin, msg->data);
         if (std::cin.eof()) {
             nats_Sleep(50);
@@ -96,16 +111,7 @@ int main(int argc, char** argv) {
                 std::cout << msg->data << std::endl;
             }
         }
-        if (!msg->data.size()) {
-            msg->subject = "bad.empty";
-        } else if (0 != msg->data.find(start)) {
-            msg->subject = "bad.start";
-        } else {
-            auto end = msg->data.find('"', start_len);
-            msg->subject = std::string::npos == end
-                ? "bad.end"
-                : msg->data.substr(start_len, end - start_len).c_str();  // TODO: there are forbidden symbols in NATS
-        }
+        msg->subject = get_subject(msg->data);
 
         // TODO: create object to check in ack
         // TODO: cpp
