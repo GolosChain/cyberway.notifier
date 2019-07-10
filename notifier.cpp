@@ -83,6 +83,7 @@ int main(int argc, char** argv) {
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
 
+    bool is_warn = false;
     while (s == NATS_OK) {
         auto msg = std::make_unique<message>();
         static const auto start = "{\"msg_type\":\"";   // ok, it's ugly. TODO: ?parse json
@@ -90,8 +91,10 @@ int main(int argc, char** argv) {
         std::getline(std::cin, msg->data);
         if (done) {
             if (msg->data.size()) {
-                std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
-                done = false;
+                if (!is_warn) {
+                    std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
+                    is_warn = true;
+                }
             } else
                 break;
         }
