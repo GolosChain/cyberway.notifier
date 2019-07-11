@@ -5,6 +5,7 @@
 #include <memory>
 #include <signal.h>
 #include <fstream>
+#include <map>
 
 static const char* usage =
     "-txt           text to send (default is 'hello')\n";
@@ -16,6 +17,7 @@ struct myPubMsgInfo {
 };
 
 static volatile bool done = false;
+static std::map<uint64_t, std::string> temp_backup;
 // natsOptions* opts   = NULL;
 // const char* cluster    = "cyberway";
 // const char* clientID   = "notifier";
@@ -24,9 +26,12 @@ static volatile bool done = false;
 
 
 struct message final {
+    uint64_t id;
     std::string subject;
     std::string data;
 }; // struct message
+
+std::fstream backup; 
 
 std::string get_subject(const std::string& data) {
     std::string subject;
@@ -49,6 +54,16 @@ bool is_file_empty(std::istream& file) {
     return file.peek() == std::istream::traits_type::eof();
 }
 
+void fill_temp_backup() {
+    backup.open("backup.txt", std::ios::in | std::ios::trunc);
+    if (is_file_empty(backup))
+        return;
+    std::string line;
+    for (auto i = 0; std::getline(backup, line); i++)
+        temp_backup[i] = line;
+    backup.close();
+}
+
 static void _publish_ack_cb(const char* guid, const char* error, void* closure) {
     std::unique_ptr<message> msg(static_cast<message*>(closure));
     // TODO: delete object from waiting list, so we can check if some object didn't published for a long time
@@ -58,7 +73,8 @@ static void _publish_ack_cb(const char* guid, const char* error, void* closure) 
     if (error != NULL) {
         std::cout << "Error: " << error << std::endl;
         done = true;    // TODO: locking
-    }
+    } else
+        temp_backup.erase(msg->id);
     // free(pubMsg);    // This is a good place to free the pubMsg info since we no longer need it
     // Notify the main thread that we are done. This is not the proper way and you should use some locking.
     // done = true;
@@ -105,20 +121,15 @@ int main(int argc, char** argv) {
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
 
-    std::fstream backup; 
-    backup.open("backup.txt", std::ios::in | std::ios::trunc);
-    bool backup_empty = true;
+    fill_temp_backup();
     bool warn = false;
-    std::string line;
-    while (s == NATS_OK) {
+    for (auto i = 0; s == NATS_OK; i++) {
         auto msg = std::make_unique<message>();
-        backup_empty = is_file_empty(backup);
-        if (backup_empty)
+        msg->id = i;
+        if (!temp_backup.size())
             std::getline(std::cin, msg->data);
-        else {
-            if (backup.is_open() && !std::getline(backup, msg->data))
-                backup.close();
-        }
+        else
+            msg->data = temp_backup[i]; 
         if (done) {
             if (msg->data.size()) {
                 if (!warn) {
@@ -128,7 +139,7 @@ int main(int argc, char** argv) {
             } else
                 break;
         }
-        if (std::cin.eof() && backup_empty) {
+        if (std::cin.eof() && !temp_backup.size()) {
             nats_Sleep(50);
             continue;
         } else {
@@ -167,17 +178,18 @@ int main(int argc, char** argv) {
         if (s == NATS_OK) {
             if (async)
                 msg.release();
-        } else 
-            line = msg->data;
-
+            else if (temp_backup.size())
+                temp_backup.erase(i);
+        }
     }
 
     if (s != NATS_OK) {
         std::cout << "Error: " << s << " - " << natsStatus_GetText(s) << std::endl;
         nats_PrintLastErrorStack(stderr);
         backup.open("backup.txt", std::ios::out | std::ios::app);
-        if (backup.is_open())
-            backup << line << std::endl;
+        if (backup.is_open() && !temp_backup.size())
+            for (auto& obj : temp_backup)
+                backup << obj.second << std::endl;
         backup.close();
     }
 
