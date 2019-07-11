@@ -4,6 +4,7 @@
 #include <iostream>
 #include <memory>
 #include <signal.h>
+#include <fstream>
 
 static const char* usage =
     "-txt           text to send (default is 'hello')\n";
@@ -42,6 +43,10 @@ std::string get_subject(const std::string& data) {
             : data.substr(start_len, end - start_len).c_str();  // TODO: there are forbidden symbols in NATS
     }
     return subject;
+}
+
+bool is_file_empty(std::istream& file) {
+    return file.peek() == std::istream::traits_type::eof();
 }
 
 static void _publish_ack_cb(const char* guid, const char* error, void* closure) {
@@ -100,20 +105,30 @@ int main(int argc, char** argv) {
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
 
-    bool is_warn = false;
+    std::fstream backup; 
+    backup.open("backup.txt", std::ios::in | std::ios::trunc);
+    bool backup_empty = true;
+    bool warn = false;
+    std::string line;
     while (s == NATS_OK) {
         auto msg = std::make_unique<message>();
-        std::getline(std::cin, msg->data);
+        backup_empty = is_file_empty(backup);
+        if (backup_empty)
+            std::getline(std::cin, msg->data);
+        else {
+            if (backup.is_open() && !std::getline(backup, msg->data))
+                backup.close();
+        }
         if (done) {
             if (msg->data.size()) {
-                if (!is_warn) {
+                if (!warn) {
                     std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
-                    is_warn = true;
+                    warn = true;
                 }
             } else
                 break;
         }
-        if (std::cin.eof()) {
+        if (std::cin.eof() && backup_empty) {
             nats_Sleep(50);
             continue;
         } else {
@@ -149,15 +164,21 @@ int main(int argc, char** argv) {
         }
 
         // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
-        if (s == NATS_OK && async) {
-            msg.release();
-        }
+        if (s == NATS_OK) {
+            if (async)
+                msg.release();
+        } else 
+            line = msg->data;
 
     }
 
     if (s != NATS_OK) {
         std::cout << "Error: " << s << " - " << natsStatus_GetText(s) << std::endl;
         nats_PrintLastErrorStack(stderr);
+        backup.open("backup.txt", std::ios::out | std::ios::app);
+        if (backup.is_open())
+            backup << line << std::endl;
+        backup.close();
     }
 
     stanConnection_Destroy(sc);
