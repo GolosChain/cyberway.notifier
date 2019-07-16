@@ -29,7 +29,7 @@ struct message final {
     std::string data;
 }; // struct message
 
-static std::map<uint64_t, message> temp_backup;
+static std::map<uint64_t, message> msgs_queue;
 
 std::fstream backup; 
 
@@ -54,15 +54,15 @@ bool is_file_empty(std::istream& file) {
     return file.peek() == std::istream::traits_type::eof();
 }
 
-void fill_temp_backup() {
+void fill_msgs_queue() {
     backup.open("backup.txt", std::ios::in | std::ios::trunc);
     if (is_file_empty(backup))
         return;
     std::string line;
     for (auto i = 0; std::getline(backup, line); i++) {
-        temp_backup[i].subject = line;
+        msgs_queue[i].subject = line;
         std::getline(backup, line);
-        temp_backup[i].data = line;
+        msgs_queue[i].data = line;
     }
     backup.close();
 }
@@ -76,7 +76,7 @@ static void _publish_ack_cb(const char* guid, const char* error, void* closure) 
         std::cout << "Error: " << error << std::endl;
         done = true;    // TODO: locking
     } else
-        temp_backup.erase(*(static_cast<int*>(closure)));
+        msgs_queue.erase(*(static_cast<int*>(closure)));
     // free(pubMsg);    // This is a good place to free the pubMsg info since we no longer need it
     // Notify the main thread that we are done. This is not the proper way and you should use some locking.
     // done = true;
@@ -123,14 +123,14 @@ int main(int argc, char** argv) {
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
 
-    fill_temp_backup();
+    fill_msgs_queue();
     bool warn = false;
     uint64_t size;
     for (auto j = 0; s == NATS_OK; j++) {
-        size = temp_backup.size();
-        std::getline(std::cin, temp_backup[size].data);
+        size = msgs_queue.size();
+        std::getline(std::cin, msgs_queue[size].data);
         if (done) {
-            if (temp_backup[size].data.size()) {
+            if (msgs_queue[size].data.size()) {
                 if (!warn) {
                     std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
                     warn = true;
@@ -138,15 +138,15 @@ int main(int argc, char** argv) {
             } else
                 break;
         }
-        if (std::cin.eof() && !temp_backup.size()) {
+        if (std::cin.eof() && !msgs_queue.size()) {
             nats_Sleep(50);
             continue;
         } else {
             if (print) {
-                std::cout << temp_backup[j].data << std::endl;
+                std::cout << msgs_queue[j].data << std::endl;
             }
         }
-        temp_backup[j].subject = get_subject(temp_backup[j].data);
+        msgs_queue[j].subject = get_subject(msgs_queue[j].data);
 
         // TODO: create object to check in ack
         // TODO: cpp
@@ -162,9 +162,9 @@ int main(int argc, char** argv) {
         // s = stanConnection_PublishAsync(sc, subj, pubMsg->payload, pubMsg->size, _pubAckHandler, (void*)pubMsg);
         for (int i = 0; i < 24 * 1000; ++i) {
             if (async) {
-                s = stanConnection_PublishAsync(sc, temp_backup[j].subject.c_str(), temp_backup[j].data.c_str(), temp_backup[j].data.size(), _publish_ack_cb, &j);
+                s = stanConnection_PublishAsync(sc, msgs_queue[j].subject.c_str(), msgs_queue[j].data.c_str(), msgs_queue[j].data.size(), _publish_ack_cb, &j);
             } else {
-                s = stanConnection_Publish(sc, temp_backup[j].subject.c_str(), temp_backup[j].data.c_str(), temp_backup[j].data.size());
+                s = stanConnection_Publish(sc, msgs_queue[j].subject.c_str(), msgs_queue[j].data.c_str(), msgs_queue[j].data.size());
             }
             if (s == NATS_TIMEOUT) {
                 nats_Sleep(50);
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
 
         // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
         if (s == NATS_OK && !async) {
-            temp_backup.erase(j);
+            msgs_queue.erase(j);
         }
     }
 
@@ -183,8 +183,8 @@ int main(int argc, char** argv) {
         std::cout << "Error: " << s << " - " << natsStatus_GetText(s) << std::endl;
         nats_PrintLastErrorStack(stderr);
         backup.open("backup.txt", std::ios::out | std::ios::app);
-        if (backup.is_open() && !temp_backup.size()) {
-            for (auto& obj : temp_backup) {
+        if (backup.is_open() && !msgs_queue.size()) {
+            for (auto& obj : msgs_queue) {
                 backup << obj.second.subject << std::endl;
                 backup << obj.second.data << std::endl;
             }
