@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 
 project(cyber-notifier)
+find_package(Boost REQUIRED COMPONENTS system)
 find_package(Threads)
 if(APPLE)
   include_directories(/usr/local/include)
