@@ -8,6 +8,9 @@
 #include <map>
 #include <tuple>
 #include <vector>
+#include <boost/asio.hpp>
+
+const std::string SOCKET_NAME = "/tmp/notifier.sock";
 
 static const char* usage =
     "-txt           text to send (default is 'hello')\n";
@@ -121,6 +124,15 @@ static void connectionLostCB(stanConnection *sc, const char *errTxt, void *closu
 }
 
 int main(int argc, char** argv) {
+    ::unlink(SOCKET_NAME.c_str());
+
+    boost::asio::io_service io_service;
+    boost::asio::local::stream_protocol::endpoint ep(SOCKET_NAME);
+    boost::asio::local::stream_protocol::acceptor acceptor(io_service, ep);
+    boost::asio::local::stream_protocol::socket socket(io_service);
+
+    acceptor.accept(socket);
+
     opts = parseArgs(argc, argv, usage);
     std::cout << "Sending pipe messages" << std::endl;
 
@@ -186,6 +198,22 @@ int main(int argc, char** argv) {
             lambda_send_message(&it->first, it->second);
             bad_msgs_queue.pop_back();
         }
+
+//        if (!backup_msgs_size) {
+//            for (;;) {
+//                boost::asio::streambuf buffer;
+//                boost::system::error_code error;
+//                if (0 == boost::asio::read(socket, buffer, boost::asio::transfer_at_least(1), error))
+//                    break;
+//
+//                if (error && error != boost::asio::error::eof)
+//                    std::cerr << "Error: " << error.message() << std::endl;
+//                else {
+//                    std::string data(boost::asio::buffer_cast<const char*>(buffer.data()));
+//                    temp_backup[size].data = data;
+//                    break;
+//                }
+//            }
 
         std::string data;
         std::getline(std::cin, data);
