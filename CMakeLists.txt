@@ -41,4 +41,5 @@ if(APPLE)
 else(APPLE)
   target_link_libraries(${outname} nats ${NATS_EXTRA_LIB} ${PROTOBUF_LIB})
 endif(APPLE)
+target_link_libraries(${outname} ${CMAKE_THREAD_LIBS_INIT})
 
