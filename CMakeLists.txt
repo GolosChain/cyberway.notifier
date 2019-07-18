@@ -15,6 +15,7 @@ endif(APPLE)
 
 add_definitions(-std=c++14)
 add_definitions(-DNATS_HAS_STREAMING)
+add_definitions(-DBOOST_ERROR_CODE_HEADER_ONLY)
 #add_definitions(-DNATS_CONN_STATUS_NO_PREFIX)
 
 # Platform specific settings
