@@ -10,7 +10,7 @@
 #include <vector>
 #include <boost/asio.hpp>
 
-const std::string SOCKET_NAME = "/tmp/notifier.sock";
+const std::string DEFAULT_SOCKET_NAME = "/tmp/notifier.sock";
 
 static const char* usage =
     "-txt           text to send (default is 'hello')\n";
@@ -124,10 +124,14 @@ static void connectionLostCB(stanConnection *sc, const char *errTxt, void *closu
 }
 
 int main(int argc, char** argv) {
-    ::unlink(SOCKET_NAME.c_str());
+    auto socket_name = DEFAULT_SOCKET_NAME;
+    if (argc == 2)
+        socket_name = argv[1];
+    
+    ::unlink(socket_name.c_str());
 
     boost::asio::io_service io_service;
-    boost::asio::local::stream_protocol::endpoint ep(SOCKET_NAME);
+    boost::asio::local::stream_protocol::endpoint ep(socket_name);
     boost::asio::local::stream_protocol::acceptor acceptor(io_service, ep);
     boost::asio::local::stream_protocol::socket socket(io_service);
 
