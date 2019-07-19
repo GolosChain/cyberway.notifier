@@ -2,9 +2,10 @@ ARG buildtype=stable
 FROM cyberway/builder:$buildtype as builder
 
 ARG branch=master
+ARG compiletype=RelWithDebInfo
 
 RUN cd /opt && wget https://github.com/nats-io/cnats/archive/v1.8.0.tar.gz && tar -xzf v1.8.0.tar.gz \
-    && cd nats.c-1.8.0 && mkdir build && cd ./build && cmake .. && make && make install
+    && cd nats.c-1.8.0 && mkdir build && cd ./build && cmake -DCMAKE_BUILD_TYPE=$compiletype .. && make && make install
 
 RUN echo "/opt/cnats-1.8.0/pbuf/lib/linux/" > /etc/ld.so.conf.d/protobuf-c.conf && ldconfig
 
@@ -15,7 +16,7 @@ RUN cd /opt && git clone -b $branch https://github.com/GolosChain/cyberway.notif
 RUN cd /opt/cyberway.notifier && mkdir build && cd build \
     && echo "$branch:$(git rev-parse HEAD)" > /etc/cyberway-notifier-version \
     && cmake \
-        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_BUILD_TYPE=$compiletype \
         -DCMAKE_C_COMPILER=clang \
         -DCMAKE_CXX_COMPILER=clang++ \
         .. \

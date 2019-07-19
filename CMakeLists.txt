@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 2.8)
 
 project(cyber-notifier)
 
+if(APPLE)
+  include_directories(/usr/local/include)
+  link_directories(/usr/local/lib)
+endif(APPLE)
 # Uncomment to have the build process verbose
 #set(CMAKE_VERBOSE_MAKEFILE TRUE)
 
@@ -22,10 +26,19 @@ endif(UNIX)
 
 
 set(outname "cyber-notifier")
-set(PROTOBUF_LIB "/opt/nats.c-1.8.0/pbuf/lib/linux/libprotobuf-c.so")
+if(APPLE)
+  set(PROTOBUF_LIB "/usr/local/nats.c/pbuf/lib/darwin/libprotobuf-c.a")
+else(APPLE)
+  set(PROTOBUF_LIB "/opt/nats.c-1.8.0/pbuf/lib/linux/libprotobuf-c.so")
+endif(APPLE)
 
 # Build the executable
 add_executable(${outname} ${PROJECT_SOURCE_DIR}/notifier.cpp)
 
 # Link
-target_link_libraries(${outname} nats ${NATS_EXTRA_LIB} ${PROTOBUF_LIB})
+if(APPLE)
+  target_link_libraries(${outname} nats ${PROTOBUF_LIB})
+else(APPLE)
+  target_link_libraries(${outname} nats ${NATS_EXTRA_LIB} ${PROTOBUF_LIB})
+endif(APPLE)
+
