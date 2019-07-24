@@ -17,6 +17,7 @@ struct myPubMsgInfo {
 };
 
 static volatile bool done = false;
+static uint64_t backup_msgs_size = 0;
 // natsOptions* opts   = NULL;
 // const char* cluster    = "cyberway";
 // const char* clientID   = "notifier";
@@ -54,7 +55,7 @@ bool is_file_empty(std::istream& file) {
     return file.peek() == std::istream::traits_type::eof();
 }
 
-void fill_msgs_queue() {
+void fill_backup_msgs() {
     backup.open("backup.txt", std::ios::in | std::ios::trunc);
     if (is_file_empty(backup))
         return;
@@ -65,6 +66,12 @@ void fill_msgs_queue() {
         msgs_queue[i].data = line;
     }
     backup.close();
+    backup_msgs_size = msgs_queue.size();
+}
+
+static void correct_backup_mssgs_size() {
+    if (backup_msgs_size)
+        backup_msgs_size--;
 }
 
 static void _publish_ack_cb(const char* guid, const char* error, void* closure) {
@@ -75,8 +82,10 @@ static void _publish_ack_cb(const char* guid, const char* error, void* closure) 
     if (error != NULL) {
         std::cout << "Error: " << error << std::endl;
         done = true;    // TODO: locking
-    } else
+    } else {
         msgs_queue.erase(*(static_cast<int*>(closure)));
+        correct_backup_mssgs_size(); 
+    }
     // free(pubMsg);    // This is a good place to free the pubMsg info since we no longer need it
     // Notify the main thread that we are done. This is not the proper way and you should use some locking.
     // done = true;
@@ -123,14 +132,13 @@ int main(int argc, char** argv) {
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
 
-    fill_msgs_queue();
+    fill_backup_msgs();
     bool warn = false;
-    uint64_t size;
     for (auto j = 0; s == NATS_OK; j++) {
-        size = msgs_queue.size();
-        std::getline(std::cin, msgs_queue[size].data);
+        if (!backup_msgs_size)
+            std::getline(std::cin, msgs_queue[j].data);
         if (done) {
-            if (msgs_queue[size].data.size()) {
+            if (msgs_queue[j].data.size()) {
                 if (!warn) {
                     std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
                     warn = true;
@@ -176,6 +184,7 @@ int main(int argc, char** argv) {
         // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
         if (s == NATS_OK && !async) {
             msgs_queue.erase(j);
+            correct_backup_mssgs_size();
         }
     }
 
