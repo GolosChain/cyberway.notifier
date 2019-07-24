@@ -138,7 +138,7 @@ int main(int argc, char** argv) {
     acceptor.accept(socket);
 
     opts = parseArgs(argc, argv, usage);
-    std::cout << "Sending pipe messages" << std::endl;
+    std::cout << "Sending socket messages" << std::endl;
 
     signal(SIGUSR1, sigusr1_handler);
     signal(SIGINT, sig_int_term_handler);
@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
 //                    std::cerr << "Error: " << error.message() << std::endl;
 //                else {
 //                    std::string data(boost::asio::buffer_cast<const char*>(buffer.data()));
-//                    temp_backup[size].data = data;
+//                    msgs_queue[size].data = data;
 //                    break;
 //                }
 //            }
