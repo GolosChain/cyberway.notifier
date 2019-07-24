@@ -10,7 +10,7 @@
 #include <vector>
 #include <boost/asio.hpp>
 
-const std::string DEFAULT_SOCKET_NAME = "/tmp/notifier.sock";
+const std::string DEFAULT_SOCKET_NAME = "/queue/msg.sock";
 
 static const char* usage =
     "-txt           text to send (default is 'hello')\n";
