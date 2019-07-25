@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <fstream>
 #include <map>
+#include <tuple>
 
 static const char* usage =
     "-txt           text to send (default is 'hello')\n";
@@ -17,7 +18,7 @@ struct myPubMsgInfo {
 };
 
 static volatile bool done = false;
-static uint64_t backup_msgs_size = 0;
+const std::string backup_file = "/queue/backup.txt";
 // natsOptions* opts   = NULL;
 // const char* cluster    = "cyberway";
 // const char* clientID   = "notifier";
@@ -30,9 +31,7 @@ struct message final {
     std::string data;
 }; // struct message
 
-static std::map<uint64_t, message> msgs_queue;
-
-std::fstream backup; 
+std::map<uint64_t*, message> msgs_queue;
 
 std::string get_subject(const std::string& data) {
     std::string subject;
@@ -51,27 +50,23 @@ std::string get_subject(const std::string& data) {
     return subject;
 }
 
-bool is_file_empty(std::istream& file) {
-    return file.peek() == std::istream::traits_type::eof();
+bool is_file_empty(std::ifstream& file) {
+    return file.tellg() == std::ifstream::traits_type::eof();
 }
 
 void fill_backup_msgs() {
-    backup.open("backup.txt", std::ios::in | std::ios::trunc);
-    if (is_file_empty(backup))
-        return;
-    std::string line;
-    for (auto i = 0; std::getline(backup, line); i++) {
-        msgs_queue[i].subject = line;
-        std::getline(backup, line);
-        msgs_queue[i].data = line;
-    }
-    backup.close();
-    backup_msgs_size = msgs_queue.size();
-}
+    std::ifstream backup(backup_file);
+    if (backup.is_open()) {
+        if (is_file_empty(backup))
+            return;
 
-static void correct_backup_mssgs_size() {
-    if (backup_msgs_size)
-        backup_msgs_size--;
+        for (auto [i, line_data, line_subject] = std::tuple<uint64_t, std::string, std::string>{0, "", ""};
+             std::getline(backup, line_subject), std::getline(backup, line_data); i++) {
+            msgs_queue[new uint64_t(i)] = {line_subject, line_data};
+        }
+        backup.close();
+        std::remove(backup_file.c_str());
+    }
 }
 
 static void _publish_ack_cb(const char* guid, const char* error, void* closure) {
@@ -79,12 +74,14 @@ static void _publish_ack_cb(const char* guid, const char* error, void* closure) 
     //std::cout << "#Ack#, " << guid << std::endl;
     // myPubMsgInfo* pubMsg = (myPubMsgInfo*)closure;
     // printf("Ack handler for message ID=%s Data=%.*s GUID=%s - ", pubMsg->ID, pubMsg->size, pubMsg->payload, guid);
+
     if (error != NULL) {
         std::cout << "Error: " << error << std::endl;
         done = true;    // TODO: locking
     } else {
-        msgs_queue.erase(*(static_cast<int*>(closure)));
-        correct_backup_mssgs_size(); 
+        auto index = static_cast<uint64_t*>(closure);
+        msgs_queue.erase(index);
+        delete index;
     }
     // free(pubMsg);    // This is a good place to free the pubMsg info since we no longer need it
     // Notify the main thread that we are done. This is not the proper way and you should use some locking.
@@ -124,21 +121,51 @@ int main(int argc, char** argv) {
         s = stanConnOptions_SetPubAckWait(connOpts, 120 * 1000 /* ms */);
     }
     // Create the Connection using the STAN Connection Options
-    stanConnection* sc;
+    stanConnection* sc = nullptr;
     if (s == NATS_OK) {
         s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
     }
+
+    natsConnection *nc = nullptr;
+    if (s == NATS_OK) {
+        s = stanConnection_GetNATSConnection(sc, &nc);
+    }
+
     // Once the connection is created, we can destroy the options
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
 
+    auto lambda_send_message = [&](uint64_t* index, const message& msg) {
+        for (int i = 0; i < 24 * 1000; ++i) {
+            if (async) {
+                s = stanConnection_PublishAsync(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size(), _publish_ack_cb, index);
+            } else {
+                s = stanConnection_Publish(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size());
+            }
+
+            if (s == NATS_TIMEOUT) {
+                nats_Sleep(50);
+                continue;
+            }
+            break;
+        }
+    };
+
     fill_backup_msgs();
+    for (const auto& item : msgs_queue) {
+        if (s != NATS_OK)
+            break;
+
+        lambda_send_message(item.first, item.second);
+    }
+
     bool warn = false;
-    for (auto j = 0; s == NATS_OK; j++) {
-        if (!backup_msgs_size)
-            std::getline(std::cin, msgs_queue[j].data);
+    while (s == NATS_OK) {
+        std::string data;
+        std::getline(std::cin, data);
+
         if (done) {
-            if (msgs_queue[j].data.size()) {
+            if (data.size()) {
                 if (!warn) {
                     std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
                     warn = true;
@@ -149,12 +176,20 @@ int main(int argc, char** argv) {
         if (std::cin.eof() && !msgs_queue.size()) {
             nats_Sleep(50);
             continue;
-        } else {
-            if (print) {
-                std::cout << msgs_queue[j].data << std::endl;
+        } else if (print)
+            std::cout << data << std::endl;
+
+        uint64_t *index = new uint64_t(msgs_queue.size());
+        auto [it, status] = msgs_queue.insert({ index, {get_subject(data), data} });
+        const auto& msg = it->second;
+
+        if (msgs_queue.size() >= limit_check_conn) { // TODO limit record in map, for test the connection
+            auto state = natsConnection_Status(nc);
+            if (state != NATS_CONN_STATUS_CONNECTED) {
+                s = NATS_CONNECTION_DISCONNECTED;
+                break;
             }
         }
-        msgs_queue[j].subject = get_subject(msgs_queue[j].data);
 
         // TODO: create object to check in ack
         // TODO: cpp
@@ -168,31 +203,23 @@ int main(int argc, char** argv) {
         // }
         // if (s == NATS_OK) {
         // s = stanConnection_PublishAsync(sc, subj, pubMsg->payload, pubMsg->size, _pubAckHandler, (void*)pubMsg);
-        for (int i = 0; i < 24 * 1000; ++i) {
-            if (async) {
-                s = stanConnection_PublishAsync(sc, msgs_queue[j].subject.c_str(), msgs_queue[j].data.c_str(), msgs_queue[j].data.size(), _publish_ack_cb, &j);
-            } else {
-                s = stanConnection_Publish(sc, msgs_queue[j].subject.c_str(), msgs_queue[j].data.c_str(), msgs_queue[j].data.size());
-            }
-            if (s == NATS_TIMEOUT) {
-                nats_Sleep(50);
-                continue;
-            }
-            break;
-        }
+
+        lambda_send_message(index, msg);
 
         // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
         if (s == NATS_OK && !async) {
-            msgs_queue.erase(j);
-            correct_backup_mssgs_size();
+            msgs_queue.erase(index);
+            delete index;
         }
+
+
     }
 
     if (s != NATS_OK) {
         std::cout << "Error: " << s << " - " << natsStatus_GetText(s) << std::endl;
         nats_PrintLastErrorStack(stderr);
-        backup.open("backup.txt", std::ios::out | std::ios::app);
-        if (backup.is_open() && !msgs_queue.size()) {
+        std::fstream backup(backup_file, std::ios::out | std::ios::app);
+        if (backup.is_open()) {
             for (auto& obj : msgs_queue) {
                 backup << obj.second.subject << std::endl;
                 backup << obj.second.data << std::endl;
