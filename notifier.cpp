@@ -31,7 +31,7 @@ struct message final {
     std::string data;
 }; // struct message
 
-std::map<uint64_t*, message> msgs_queue;
+std::map<uint64_t, message> msgs_queue;
 
 std::string get_subject(const std::string& data) {
     std::string subject;
@@ -62,7 +62,7 @@ void fill_backup_msgs() {
 
         for (auto [i, line_data, line_subject] = std::tuple<uint64_t, std::string, std::string>{0, "", ""};
              std::getline(backup, line_subject), std::getline(backup, line_data); i++) {
-            msgs_queue[new uint64_t(i)] = {line_subject, line_data};
+            msgs_queue.insert({ i, {line_subject, line_data} });
         }
         backup.close();
         std::remove(backup_file.c_str());
@@ -79,9 +79,8 @@ static void _publish_ack_cb(const char* guid, const char* error, void* closure) 
         std::cout << "Error: " << error << std::endl;
         done = true;    // TODO: locking
     } else {
-        auto index = static_cast<uint64_t*>(closure);
+        auto index = *(static_cast<uint64_t*>(closure));
         msgs_queue.erase(index);
-        delete index;
     }
     // free(pubMsg);    // This is a good place to free the pubMsg info since we no longer need it
     // Notify the main thread that we are done. This is not the proper way and you should use some locking.
@@ -135,10 +134,10 @@ int main(int argc, char** argv) {
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
 
-    auto lambda_send_message = [&](uint64_t* index, const message& msg) {
+    auto lambda_send_message = [&](const uint64_t* index, const message& msg) {
         for (int i = 0; i < 24 * 1000; ++i) {
             if (async) {
-                s = stanConnection_PublishAsync(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size(), _publish_ack_cb, index);
+                s = stanConnection_PublishAsync(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size(), _publish_ack_cb, const_cast<uint64_t*>(index));
             } else {
                 s = stanConnection_Publish(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size());
             }
@@ -156,7 +155,7 @@ int main(int argc, char** argv) {
         if (s != NATS_OK)
             break;
 
-        lambda_send_message(item.first, item.second);
+        lambda_send_message(&item.first, item.second);
     }
 
     bool warn = false;
@@ -179,7 +178,7 @@ int main(int argc, char** argv) {
         } else if (print)
             std::cout << data << std::endl;
 
-        uint64_t *index = new uint64_t(msgs_queue.size());
+        uint64_t index = msgs_queue.size();
         auto [it, status] = msgs_queue.insert({ index, {get_subject(data), data} });
         const auto& msg = it->second;
 
@@ -204,12 +203,11 @@ int main(int argc, char** argv) {
         // if (s == NATS_OK) {
         // s = stanConnection_PublishAsync(sc, subj, pubMsg->payload, pubMsg->size, _pubAckHandler, (void*)pubMsg);
 
-        lambda_send_message(index, msg);
+        lambda_send_message(&it->first, msg);
 
         // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
         if (s == NATS_OK && !async) {
             msgs_queue.erase(index);
-            delete index;
         }
 
 
