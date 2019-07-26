@@ -91,11 +91,27 @@ static void sigusr1_handler(int signum) {
     print = !print;
 }
 
+void create_backup_file() {
+    std::fstream backup(backup_file, std::ios::out | std::ios::app);
+    if (backup.is_open()) {
+        for (auto& obj : msgs_queue) {
+            backup << obj.second.subject << std::endl;
+            backup << obj.second.data << std::endl;
+        }
+    }
+    backup.close();
+}
+
 static void sig_int_term_handler(int signum) {
     if (signum == SIGINT)
         std::cout << "Interrupt signal (" << signum << ") received." << std::endl;
     else if (signum == SIGTERM)
         std::cout << "Termination signal (" << signum << ") received." << std::endl;
+    if (signum == SIGSEGV) {
+        std::cout << "Interrupt signal ( SIGSEGV ) received." << std::endl;
+        create_backup_file();
+        exit(-1);
+    }
     done = true;
 }
 
@@ -106,6 +122,7 @@ int main(int argc, char** argv) {
     signal(SIGUSR1, sigusr1_handler);
     signal(SIGINT, sig_int_term_handler);
     signal(SIGTERM, sig_int_term_handler);
+    signal(SIGSEGV, sig_int_term_handler);
 
     // Now create STAN Connection Options and set the NATS Options.
     stanConnOptions* connOpts;
@@ -182,14 +199,6 @@ int main(int argc, char** argv) {
         auto [it, status] = msgs_queue.insert({ index, {get_subject(data), data} });
         const auto& msg = it->second;
 
-        if (msgs_queue.size() >= limit_check_conn) { // TODO limit record in map, for test the connection
-            auto state = natsConnection_Status(nc);
-            if (state != NATS_CONN_STATUS_CONNECTED) {
-                s = NATS_CONNECTION_DISCONNECTED;
-                break;
-            }
-        }
-
         // TODO: create object to check in ack
         // TODO: cpp
         // myPubMsgInfo* pubMsg = (myPubMsgInfo*)calloc(1, sizeof(myPubMsgInfo));
@@ -209,21 +218,12 @@ int main(int argc, char** argv) {
         if (s == NATS_OK && !async) {
             msgs_queue.erase(index);
         }
-
-
     }
 
     if (s != NATS_OK) {
         std::cout << "Error: " << s << " - " << natsStatus_GetText(s) << std::endl;
         nats_PrintLastErrorStack(stderr);
-        std::fstream backup(backup_file, std::ios::out | std::ios::app);
-        if (backup.is_open()) {
-            for (auto& obj : msgs_queue) {
-                backup << obj.second.subject << std::endl;
-                backup << obj.second.data << std::endl;
-            }
-        }
-        backup.close();
+        create_backup_file();
     }
 
     stanConnection_Destroy(sc);
