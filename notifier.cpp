@@ -142,11 +142,6 @@ int main(int argc, char** argv) {
         s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
     }
 
-    natsConnection *nc = nullptr;
-    if (s == NATS_OK) {
-        s = stanConnection_GetNATSConnection(sc, &nc);
-    }
-
     // Once the connection is created, we can destroy the options
     natsOptions_Destroy(opts);
     stanConnOptions_Destroy(connOpts);
