@@ -125,8 +125,6 @@ static void connectionLostCB(stanConnection *sc, const char *errTxt, void *closu
 
 int main(int argc, char** argv) {
     auto socket_name = DEFAULT_SOCKET_NAME;
-    if (argc == 2)
-        socket_name = argv[1];
     
     ::unlink(socket_name.c_str());
 
@@ -225,7 +223,7 @@ int main(int argc, char** argv) {
         if (done) {
             if (data.size()) {
                 if (!warn) {
-                    std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
+                    std::cerr << "ERROR! You can not shut down notifier because there are input data" << std::endl;
                     warn = true;
                 }
             } else
