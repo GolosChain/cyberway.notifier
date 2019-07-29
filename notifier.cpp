@@ -107,22 +107,26 @@ static void sig_int_term_handler(int signum) {
         std::cout << "Interrupt signal (" << signum << ") received." << std::endl;
     else if (signum == SIGTERM)
         std::cout << "Termination signal (" << signum << ") received." << std::endl;
-    if (signum == SIGSEGV) {
-        std::cout << "Interrupt signal ( SIGSEGV ) received." << std::endl;
-        create_backup_file();
-        exit(-1);
-    }
     done = true;
 }
 
+static void
+connectionLostCB(stanConnection *sc, const char *errTxt, void *closure)
+{
+    bool *connLost = (bool*) closure;
+
+    printf("Connection lost: %s\n", errTxt);
+    *connLost = true;
+}
+
 int main(int argc, char** argv) {
+    bool connLost = false;
     opts = parseArgs(argc, argv, usage);
     std::cout << "Sending pipe messages" << std::endl;
 
     signal(SIGUSR1, sigusr1_handler);
     signal(SIGINT, sig_int_term_handler);
     signal(SIGTERM, sig_int_term_handler);
-    signal(SIGSEGV, sig_int_term_handler);
 
     // Now create STAN Connection Options and set the NATS Options.
     stanConnOptions* connOpts;
@@ -136,6 +140,11 @@ int main(int argc, char** argv) {
     if (s == NATS_OK) {
         s = stanConnOptions_SetPubAckWait(connOpts, 120 * 1000 /* ms */);
     }
+
+    if (s == NATS_OK) {
+        s = stanConnOptions_SetConnectionLostHandler(connOpts, connectionLostCB, (void*)&connLost);
+    }
+
     // Create the Connection using the STAN Connection Options
     stanConnection* sc = nullptr;
     if (s == NATS_OK) {
@@ -181,9 +190,12 @@ int main(int argc, char** argv) {
                     std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
                     warn = true;
                 }
-            } else
+            } else {
+                std::cout << "break" << std::endl;
                 break;
+            }
         }
+
         if (std::cin.eof() && !msgs_queue.size()) {
             nats_Sleep(50);
             continue;
@@ -215,6 +227,12 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (!connLost && (sc != NULL)) {
+        natsStatus closeSts = stanConnection_Close(sc);
+        if ((s == NATS_OK) && (closeSts != NATS_OK))
+            s = closeSts;
+    }
+
     if (s != NATS_OK) {
         std::cout << "Error: " << s << " - " << natsStatus_GetText(s) << std::endl;
         nats_PrintLastErrorStack(stderr);
@@ -222,7 +240,7 @@ int main(int argc, char** argv) {
     }
 
     stanConnection_Destroy(sc);
-    // nats_Sleep(50);    // To silence reports of memory still in-use with valgrind.
+    nats_Sleep(50);    // To silence reports of memory still in-use with valgrind.
     nats_Close();
 
     return 0;
