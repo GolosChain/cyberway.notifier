@@ -180,6 +180,7 @@ int main(int argc, char** argv) {
     }
 
     bool warn = false;
+
     while (s == NATS_OK) {
         std::string data;
         std::getline(std::cin, data);
@@ -205,19 +206,6 @@ int main(int argc, char** argv) {
         uint64_t index = msgs_queue.size();
         auto [it, status] = msgs_queue.insert({ index, {get_subject(data), data} });
         const auto& msg = it->second;
-
-        // TODO: create object to check in ack
-        // TODO: cpp
-        // myPubMsgInfo* pubMsg = (myPubMsgInfo*)calloc(1, sizeof(myPubMsgInfo));
-        // if (pubMsg == NULL)
-        //     s = NATS_NO_MEMORY;
-        // if (s == NATS_OK) {
-        //     pubMsg->payload = txt;
-        //     pubMsg->size = (int)strlen(txt);
-        //     snprintf(pubMsg->ID, sizeof(pubMsg->ID), "%s:%d", "xyz", 234);
-        // }
-        // if (s == NATS_OK) {
-        // s = stanConnection_PublishAsync(sc, subj, pubMsg->payload, pubMsg->size, _pubAckHandler, (void*)pubMsg);
 
         lambda_send_message(&it->first, msg);
 
