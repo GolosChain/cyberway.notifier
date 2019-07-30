@@ -7,6 +7,7 @@
 #include <fstream>
 #include <map>
 #include <tuple>
+#include <vector>
 
 static const char* usage =
     "-txt           text to send (default is 'hello')\n";
@@ -31,7 +32,11 @@ struct message final {
     std::string data;
 }; // struct message
 
+
+stanConnOptions* connOpts = nullptr;
+
 std::map<uint64_t, message> msgs_queue;
+std::vector<uint64_t> bad_msgs_queue;
 
 std::string get_subject(const std::string& data) {
     std::string subject;
@@ -77,6 +82,7 @@ static void _publish_ack_cb(const char* guid, const char* error, void* closure) 
 
     if (error != NULL) {
         std::cout << "Error: " << error << std::endl;
+        bad_msgs_queue.push_back(*(static_cast<uint64_t*>(closure)));
         done = true;    // TODO: locking
     } else {
         auto index = *(static_cast<uint64_t*>(closure));
@@ -110,17 +116,11 @@ static void sig_int_term_handler(int signum) {
     done = true;
 }
 
-static void
-connectionLostCB(stanConnection *sc, const char *errTxt, void *closure)
-{
-    bool *connLost = (bool*) closure;
-
-    printf("Connection lost: %s\n", errTxt);
-    *connLost = true;
+static void connectionLostCB(stanConnection *sc, const char *errTxt, void *closure) {
+    std::cout << "Connection lost: " << errTxt << std::endl;
 }
 
 int main(int argc, char** argv) {
-    bool connLost = false;
     opts = parseArgs(argc, argv, usage);
     std::cout << "Sending pipe messages" << std::endl;
 
@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
     signal(SIGTERM, sig_int_term_handler);
 
     // Now create STAN Connection Options and set the NATS Options.
-    stanConnOptions* connOpts;
+
     natsStatus s = stanConnOptions_Create(&connOpts);
     if (s == NATS_OK) {
         s = stanConnOptions_SetNATSOptions(connOpts, opts);
@@ -140,20 +140,15 @@ int main(int argc, char** argv) {
     if (s == NATS_OK) {
         s = stanConnOptions_SetPubAckWait(connOpts, 120 * 1000 /* ms */);
     }
-
     if (s == NATS_OK) {
-        s = stanConnOptions_SetConnectionLostHandler(connOpts, connectionLostCB, (void*)&connLost);
+        s = stanConnOptions_SetConnectionLostHandler(connOpts, connectionLostCB, nullptr);
     }
-
-    // Create the Connection using the STAN Connection Options
     stanConnection* sc = nullptr;
     if (s == NATS_OK) {
-        s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
+        s = stanConnection_Connect(&sc, cluster, clientID, connOpts);        
     }
 
-    // Once the connection is created, we can destroy the options
     natsOptions_Destroy(opts);
-    stanConnOptions_Destroy(connOpts);
 
     auto lambda_send_message = [&](const uint64_t* index, const message& msg) {
         for (int i = 0; i < 24 * 1000; ++i) {
@@ -162,6 +157,9 @@ int main(int argc, char** argv) {
             } else {
                 s = stanConnection_Publish(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size());
             }
+
+            if (s == NATS_CONNECTION_CLOSED)
+                s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
 
             if (s == NATS_TIMEOUT) {
                 nats_Sleep(50);
@@ -172,16 +170,24 @@ int main(int argc, char** argv) {
     };
 
     fill_backup_msgs();
+    std::cout << "msgs_queue size: " << msgs_queue.size() << std::endl;
     for (const auto& item : msgs_queue) {
         if (s != NATS_OK)
             break;
-
         lambda_send_message(&item.first, item.second);
     }
 
     bool warn = false;
-
     while (s == NATS_OK) {
+        while (bad_msgs_queue.size()) {
+            if (s != NATS_OK)
+                break;
+
+            const auto& it = msgs_queue.find(bad_msgs_queue.back());
+            lambda_send_message(&it->first, it->second);
+            bad_msgs_queue.pop_back();
+        }
+
         std::string data;
         std::getline(std::cin, data);
 
@@ -191,10 +197,8 @@ int main(int argc, char** argv) {
                     std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
                     warn = true;
                 }
-            } else {
-                std::cout << "break" << std::endl;
+            } else
                 break;
-            }
         }
 
         if (std::cin.eof() && !msgs_queue.size()) {
@@ -215,21 +219,17 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (!connLost && (sc != NULL)) {
-        natsStatus closeSts = stanConnection_Close(sc);
-        if ((s == NATS_OK) && (closeSts != NATS_OK))
-            s = closeSts;
-    }
+    stanConnOptions_Destroy(connOpts);
+    stanConnection_Close(sc);
+    stanConnection_Destroy(sc);
+    nats_Sleep(50);    // To silence reports of memory still in-use with valgrind.
+    nats_Close();
 
     if (s != NATS_OK) {
         std::cout << "Error: " << s << " - " << natsStatus_GetText(s) << std::endl;
         nats_PrintLastErrorStack(stderr);
         create_backup_file();
     }
-
-    stanConnection_Destroy(sc);
-    nats_Sleep(50);    // To silence reports of memory still in-use with valgrind.
-    nats_Close();
 
     return 0;
 }
