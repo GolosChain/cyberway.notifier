@@ -35,8 +35,8 @@ struct message final {
 
 stanConnOptions* connOpts = nullptr;
 
-std::map<uint64_t, message> msgs_queue;
 std::vector<uint64_t> bad_msgs_queue;
+std::map<uint64_t, message> msgs_queue;
 
 std::string get_subject(const std::string& data) {
     std::string subject;
@@ -170,7 +170,6 @@ int main(int argc, char** argv) {
     };
 
     fill_backup_msgs();
-    std::cout << "msgs_queue size: " << msgs_queue.size() << std::endl;
     for (const auto& item : msgs_queue) {
         if (s != NATS_OK)
             break;
