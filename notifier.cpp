@@ -10,7 +10,6 @@
 #include <vector>
 #include <boost/asio.hpp>
 
-const std::string DEFAULT_SOCKET_NAME = "/queue/msg.sock";
 
 static const char* usage =
     "-txt           text to send (default is 'hello')\n";
@@ -23,6 +22,7 @@ struct myPubMsgInfo {
 
 static volatile bool done = false;
 const std::string backup_file = "/queue/backup.txt";
+const std::string DEFAULT_SOCKET_NAME = "/queue/msg.sock";
 // natsOptions* opts   = NULL;
 // const char* cluster    = "cyberway";
 // const char* clientID   = "notifier";
@@ -126,14 +126,16 @@ static void connectionLostCB(stanConnection *sc, const char *errTxt, void *closu
 int main(int argc, char** argv) {
     auto socket_name = DEFAULT_SOCKET_NAME;
     
-    ::unlink(socket_name.c_str());
-
     boost::asio::io_service io_service;
     boost::asio::local::stream_protocol::endpoint ep(socket_name);
-    boost::asio::local::stream_protocol::acceptor acceptor(io_service, ep);
     boost::asio::local::stream_protocol::socket socket(io_service);
 
-    acceptor.accept(socket);
+    try {
+        socket.connect(ep);
+    } catch (const boost::system::system_error &err) {
+        std::cout << "failed to connect to notifier socket: " << err.what() << std::endl;
+        throw;
+    }
 
     opts = parseArgs(argc, argv, usage);
     std::cout << "Sending socket messages" << std::endl;
@@ -201,24 +203,12 @@ int main(int argc, char** argv) {
             bad_msgs_queue.pop_back();
         }
 
-//        if (!backup_msgs_size) {
-//            for (;;) {
-//                boost::asio::streambuf buffer;
-//                boost::system::error_code error;
-//                if (0 == boost::asio::read(socket, buffer, boost::asio::transfer_at_least(1), error))
-//                    break;
-//
-//                if (error && error != boost::asio::error::eof)
-//                    std::cerr << "Error: " << error.message() << std::endl;
-//                else {
-//                    std::string data(boost::asio::buffer_cast<const char*>(buffer.data()));
-//                    msgs_queue[size].data = data;
-//                    break;
-//                }
-//            }
+        boost::asio::streambuf buf;
+        boost::asio::read_until( socket, buf, "\n" );
+        std::string data = boost::asio::buffer_cast<const char*>(buf.data());
+        std::cout << data << " " << std::endl;
 
-        std::string data;
-        std::getline(std::cin, data);
+        continue;
 
         if (done) {
             if (data.size()) {
@@ -230,7 +220,7 @@ int main(int argc, char** argv) {
                 break;
         }
 
-        if (std::cin.eof() && !msgs_queue.size()) {
+        if ( data.empty() ) {
             nats_Sleep(50);
             continue;
         } else if (print)

@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 2.8)
 
 project(cyber-notifier)
-find_package(Boost REQUIRED COMPONENTS system)
-find_package(Threads)
+SET(BOOST_ROOT "~/opt/boost")
+FIND_PACKAGE(Boost 1.67 REQUIRED COMPONENTS
+    system
+    iostreams)
 if(APPLE)
   include_directories(/usr/local/include)
   link_directories(/usr/local/lib)
@@ -31,7 +33,7 @@ set(outname "cyber-notifier")
 if(APPLE)
   set(PROTOBUF_LIB "/usr/local/nats.c/pbuf/lib/darwin/libprotobuf-c.a")
 else(APPLE)
-  set(PROTOBUF_LIB "/opt/nats.c-1.8.0/pbuf/lib/linux/libprotobuf-c.so")
+  set(PROTOBUF_LIB "/opt/nats.c/pbuf/lib/linux/libprotobuf-c.so")
 endif(APPLE)
 
 # Build the executable
