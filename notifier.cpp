@@ -82,10 +82,10 @@ static void _publish_ack_cb(const char* guid, const char* error, void* closure) 
 
     if (error != NULL) {
         std::cout << "Error: " << error << std::endl;
-        bad_msgs_queue.push_back(*(static_cast<uint64_t*>(closure)));
+        bad_msgs_queue.push_back((uint64_t)closure);
         done = true;    // TODO: locking
     } else {
-        auto index = *(static_cast<uint64_t*>(closure));
+        auto index = (uint64_t)closure;
         msgs_queue.erase(index);
     }
     // free(pubMsg);    // This is a good place to free the pubMsg info since we no longer need it
@@ -150,10 +150,10 @@ int main(int argc, char** argv) {
 
     natsOptions_Destroy(opts);
 
-    auto lambda_send_message = [&](const uint64_t* index, const message& msg) {
+    auto lambda_send_message = [&](void* index, const message& msg) {
         for (int i = 0; i < 24 * 1000; ++i) {
             if (async) {
-                s = stanConnection_PublishAsync(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size(), _publish_ack_cb, const_cast<uint64_t*>(index));
+                s = stanConnection_PublishAsync(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size(), _publish_ack_cb, index);
             } else {
                 s = stanConnection_Publish(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size());
             }
@@ -173,7 +173,7 @@ int main(int argc, char** argv) {
     for (const auto& item : msgs_queue) {
         if (s != NATS_OK)
             break;
-        lambda_send_message(&item.first, item.second);
+        lambda_send_message((void*)item.first, item.second);
     }
 
     bool warn = false;
@@ -183,7 +183,7 @@ int main(int argc, char** argv) {
                 break;
 
             const auto& it = msgs_queue.find(bad_msgs_queue.back());
-            lambda_send_message(&it->first, it->second);
+            lambda_send_message((void*)it->first, it->second);
             bad_msgs_queue.pop_back();
         }
 
@@ -210,7 +210,7 @@ int main(int argc, char** argv) {
         auto [it, status] = msgs_queue.insert({ index, {get_subject(data), data} });
         const auto& msg = it->second;
 
-        lambda_send_message(&it->first, msg);
+        lambda_send_message((void*)index, msg);
 
         // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
         if (s == NATS_OK && !async) {
