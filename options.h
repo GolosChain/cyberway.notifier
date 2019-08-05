@@ -23,6 +23,7 @@ const char* subj    = "foo";
 const char* txt     = "hello";
 const char* name    = "worker";
 int64_t     total   = 1000000;
+const uint32_t limit_check_conn = 10;
 
 volatile int64_t count   = 0;
 volatile int64_t dropped = 0;
