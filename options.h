@@ -23,13 +23,12 @@ const char* subj    = "foo";
 const char* txt     = "hello";
 const char* name    = "worker";
 int64_t     total   = 1000000;
-const uint32_t limit_check_conn = 10;
 
 volatile int64_t count   = 0;
 volatile int64_t dropped = 0;
 int64_t          start   = 0;
 volatile int64_t elapsed = 0;
-bool             print   = false;
+bool             print   = true;
 int64_t          timeout = 10000; // 10 seconds.
 
 natsOptions*    opts     = NULL;

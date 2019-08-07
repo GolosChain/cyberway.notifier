@@ -5,11 +5,17 @@
 #include <memory>
 #include <signal.h>
 #include <fstream>
+
 #include <map>
+#include <deque>
 #include <tuple>
 #include <vector>
-#include <boost/asio.hpp>
+#include <thread>
 
+
+
+#include <boost/asio.hpp>
+#include <boost/algorithm/string.hpp>
 
 static const char* usage =
     "-txt           text to send (default is 'hello')\n";
@@ -21,8 +27,13 @@ struct myPubMsgInfo {
 };
 
 static volatile bool done = false;
+static volatile bool close_thread = false;
 const std::string backup_file = "/queue/backup.txt";
 const std::string DEFAULT_SOCKET_NAME = "/queue/msg.sock";
+
+boost::asio::io_service io_service;
+boost::asio::local::stream_protocol::endpoint ep(DEFAULT_SOCKET_NAME);
+boost::asio::local::stream_protocol::socket socket_stream(io_service);
 // natsOptions* opts   = NULL;
 // const char* cluster    = "cyberway";
 // const char* clientID   = "notifier";
@@ -123,15 +134,49 @@ static void connectionLostCB(stanConnection *sc, const char *errTxt, void *closu
     std::cout << "Connection lost: " << errTxt << std::endl;
 }
 
-int main(int argc, char** argv) {
-    auto socket_name = DEFAULT_SOCKET_NAME;
-    
-    boost::asio::io_service io_service;
-    boost::asio::local::stream_protocol::endpoint ep(socket_name);
-    boost::asio::local::stream_protocol::socket socket(io_service);
+void test(std::deque<std::string>* v_data) {
+    std::string data = "";
+    while (true) {
+        if (close_thread)
+            break;
 
+        boost::asio::streambuf buf;
+        boost::system::error_code error;
+        auto len = boost::asio::read(socket_stream, buf, boost::asio::transfer_at_least(1), error);
+        if( error && error != boost::asio::error::eof ) {
+            std::cout << "receive failed: " << error.message() << std::endl;
+            nats_Sleep(50);
+            continue;
+        }
+
+        auto temp = std::string(const_cast<char *>( boost::asio::buffer_cast<const char*>(buf.data()) ));
+        temp.erase( std::remove_if(temp.begin(), temp.end(), [&](const char el) {
+                if ((int)el < 32 && (int)el != 10) {
+                    return true;
+                }
+
+                return false;
+            }
+        ) , temp.end() );
+
+        data += temp;
+        std::vector<std::string> local_v_data;
+        boost::split(local_v_data, data, boost::algorithm::is_any_of("\n"));
+
+        data = local_v_data.back(); // TODO if string is not finished
+        local_v_data.pop_back(); // TODO erase last element, because do not finished
+
+        if(local_v_data.size() == 0) // TODO if vector size = 0, then string not finished
+            continue;
+
+        for (auto item : local_v_data)
+            v_data->push_front(item);
+    }
+}
+
+int main(int argc, char** argv) {
     try {
-        socket.connect(ep);
+        socket_stream.connect(ep);
     } catch (const boost::system::system_error &err) {
         std::cout << "failed to connect to notifier socket: " << err.what() << std::endl;
         throw;
@@ -163,7 +208,6 @@ int main(int argc, char** argv) {
     if (s == NATS_OK) {
         s = stanConnection_Connect(&sc, cluster, clientID, connOpts);        
     }
-
     natsOptions_Destroy(opts);
 
     auto lambda_send_message = [&](void* index, const message& msg) {
@@ -192,7 +236,10 @@ int main(int argc, char** argv) {
         lambda_send_message((void*)item.first, item.second);
     }
 
-    bool warn = false;
+//    std::string data = "";
+    std::deque<std::string> v_data;
+    std::thread th(test, &v_data);
+
     while (s == NATS_OK) {
         while (bad_msgs_queue.size()) {
             if (s != NATS_OK)
@@ -202,44 +249,39 @@ int main(int argc, char** argv) {
             lambda_send_message((void*)it->first, it->second);
             bad_msgs_queue.pop_back();
         }
+        while (v_data.size()) {
+            auto item = v_data.back(); // TODO if string is not finished
+            v_data.pop_back(); // TODO erase last element, because do not finished
+            if (print)
+                std::cout << item << std::endl;
 
-        boost::asio::streambuf buf;
-        boost::asio::read_until( socket, buf, "\n" );
-        std::string data = boost::asio::buffer_cast<const char*>(buf.data());
-        std::cout << data << " " << std::endl;
-        
-        //std::string data;
-        //std::getline(std::cin, data);
+            uint64_t index = msgs_queue.size() ? msgs_queue.rbegin()->first + 1 : msgs_queue.size();
+            auto [it, status] = msgs_queue.insert({ index, {get_subject(item), item} });
+            const auto& msg = it->second;
 
-        continue;
+            lambda_send_message((void*)index, msg);
 
-        if (done) {
-            if (data.size()) {
-                if (!warn) {
-                    std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
-                    warn = true;
-                }
-            } else
-                break;
+            if (s != NATS_OK)
+                continue;
+
+            // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
+            if (s == NATS_OK && !async) {
+                msgs_queue.erase(index);
+            }
         }
 
-        if (std::cin.eof() && !msgs_queue.size()) {
+        if (done && s != NATS_OK)
+                break;
+
+        if (!msgs_queue.size()) {
             nats_Sleep(50);
             continue;
-        } else if (print)
-            std::cout << data << std::endl;
-
-        uint64_t index = msgs_queue.size();
-        auto [it, status] = msgs_queue.insert({ index, {get_subject(data), data} });
-        const auto& msg = it->second;
-
-        lambda_send_message((void*)index, msg);
-
-        // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
-        if (s == NATS_OK && !async) {
-            msgs_queue.erase(index);
         }
     }
+
+
+    close_thread = true;
+    th.join();
 
     stanConnOptions_Destroy(connOpts);
     stanConnection_Close(sc);

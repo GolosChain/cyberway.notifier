@@ -28,6 +28,7 @@ if(UNIX)
   endif()
 endif(UNIX)
 
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -pthread")
 
 set(outname "cyber-notifier")
 if(APPLE)
