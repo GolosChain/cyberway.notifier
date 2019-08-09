@@ -129,15 +129,11 @@ static void connectionLostCB(stanConnection *sc, const char *errTxt, void *closu
     std::cout << "Connection lost: " << errTxt << std::endl;
 }
 
-void test() {
-
-}
-
 int main(int argc, char** argv) {
     try {
         socket_stream.connect(ep);
-        if (!socket_stream.native_non_blocking())
-                socket_stream.native_non_blocking(true);
+        if (socket_stream.native_non_blocking())
+            socket_stream.native_non_blocking(false);
     } catch (const boost::system::system_error &err) {
         std::cout << "failed to connect to notifier socket: " << err.what() << std::endl;
         throw;
@@ -210,18 +206,22 @@ int main(int argc, char** argv) {
 
         boost::asio::streambuf buf;
         boost::system::error_code error;
-        boost::asio::read_until(socket_stream, buf, "\n", error);
+        auto n = boost::asio::read_until(socket_stream, buf, "\n", error);
+        boost::asio::streambuf::const_buffers_type bufs = buf.data();
+        std::string data_stream(
+            boost::asio::buffers_begin(bufs),
+            boost::asio::buffers_begin(bufs) + n);
 
         std::stringstream str_stream;
-        auto data_stream = std::string(const_cast<char *>( boost::asio::buffer_cast<const char*>(buf.data()) ));
-        data_stream.erase( std::remove_if(data_stream.begin(), data_stream.end(), [&](const char el) {
-            if ((int)el == 10)
-                return false;
-            else if ((int)el <= 31)
-                return true;
+//        auto data_stream = std::string(const_cast<char *>( boost::asio::buffer_cast<const char*>(buf.data()) ));
+//        data_stream.erase( std::remove_if(data_stream.begin(), data_stream.end(), [&](const char el) {
+//            if ((int)el == 10)
+//                return false;
+//            else if ((int)el <= 31)
+//                return true;
 
-            return false;
-        }) , data_stream.end() );
+//            return false;
+//        }) , data_stream.end() );
 
         str_stream << data_buf << data_stream;
         if( error && error != boost::asio::error::eof ) {
@@ -231,10 +231,9 @@ int main(int argc, char** argv) {
         }
         data_buf.clear();
 
-        while(!str_stream.eof()) {
-
-            std::string data;
-            std::getline(str_stream, data);
+//        while(!str_stream.eof()) {
+            std::string data = data_stream;
+//            std::getline(str_stream, data);
 
             try {
                 if (data.empty())
@@ -262,9 +261,10 @@ int main(int argc, char** argv) {
                     msgs_queue.erase(index);
                 }
             } catch (...) {
-                data_buf = data;
+                std::cout << "ERROR: " << data << std::endl;
+//                data_buf = data;
             }
-        }
+//        }
 
         if (done && s != NATS_OK)
                 break;
