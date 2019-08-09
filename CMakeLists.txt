@@ -15,18 +15,14 @@ endif(APPLE)
 # Uncomment to have the executable moved to 'build' instead of their respective 'build/xxx' directories
 #set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
 
-add_definitions(-std=c++14)
+add_definitions(-std=c++17)
 add_definitions(-DNATS_HAS_STREAMING)
 add_definitions(-DBOOST_ERROR_CODE_HEADER_ONLY)
 #add_definitions(-DNATS_CONN_STATUS_NO_PREFIX)
 
-# Platform specific settings
-if(UNIX)
-#   include(GNUInstallDirs)
-  if(NOT APPLE)
-    set(NATS_EXTRA_LIB "rt")
-  endif()
-endif(UNIX)
+set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+find_package(Threads)
 
 set(outname "cyber-notifier")
 if(APPLE)
@@ -45,5 +41,5 @@ else(APPLE)
   target_link_libraries(${outname} nats ${NATS_EXTRA_LIB} ${PROTOBUF_LIB})
 endif(APPLE)
 
-target_link_libraries(${outname} ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(${outname} Threads::Threads)
 
