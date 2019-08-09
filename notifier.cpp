@@ -132,8 +132,8 @@ static void connectionLostCB(stanConnection *sc, const char *errTxt, void *closu
 int main(int argc, char** argv) {
     try {
         socket_stream.connect(ep);
-        if (socket_stream.native_non_blocking())
-            socket_stream.native_non_blocking(false);
+        if (!socket_stream.native_non_blocking())
+            socket_stream.native_non_blocking(true);
     } catch (const boost::system::system_error &err) {
         std::cout << "failed to connect to notifier socket: " << err.what() << std::endl;
         throw;
@@ -147,7 +147,6 @@ int main(int argc, char** argv) {
     signal(SIGTERM, sig_int_term_handler);
 
     // Now create STAN Connection Options and set the NATS Options.
-
     natsStatus s = stanConnOptions_Create(&connOpts);
     if (s == NATS_OK) {
         s = stanConnOptions_SetNATSOptions(connOpts, opts);
@@ -207,23 +206,19 @@ int main(int argc, char** argv) {
         boost::asio::streambuf buf;
         boost::system::error_code error;
         auto n = boost::asio::read_until(socket_stream, buf, "\n", error);
-        boost::asio::streambuf::const_buffers_type bufs = buf.data();
-        std::string data_stream(
-            boost::asio::buffers_begin(bufs),
-            boost::asio::buffers_begin(bufs) + n);
 
         std::stringstream str_stream;
-//        auto data_stream = std::string(const_cast<char *>( boost::asio::buffer_cast<const char*>(buf.data()) ));
-//        data_stream.erase( std::remove_if(data_stream.begin(), data_stream.end(), [&](const char el) {
-//            if ((int)el == 10)
-//                return false;
-//            else if ((int)el <= 31)
-//                return true;
+        auto data_stream = std::string(const_cast<char *>( boost::asio::buffer_cast<const char*>(buf.data()) ));
+        data_stream.erase( std::remove_if(data_stream.begin(), data_stream.end(), [&](const char el) {
+            if ((int)el == 10)
+                return false;
+            else if ((int)el <= 31)
+                return true;
 
-//            return false;
-//        }) , data_stream.end() );
+            return false;
+        }) , data_stream.end() );
 
-        str_stream << data_buf << data_stream;
+        str_stream << std::move(data_buf) << std::move(data_stream);
         if( error && error != boost::asio::error::eof ) {
             std::cout << "receive failed: " << error.message() << std::endl;
             nats_Sleep(50);
@@ -231,16 +226,16 @@ int main(int argc, char** argv) {
         }
         data_buf.clear();
 
-//        while(!str_stream.eof()) {
-            std::string data = data_stream;
-//            std::getline(str_stream, data);
+        while(!str_stream.eof()) {
+            std::string data;
+            std::getline(str_stream, data);
 
             try {
                 if (data.empty())
                     break;
 
                 std::stringstream local_stream;
-                local_stream << data;
+                local_stream << std::move(data);
                 boost::property_tree::ptree pt;
                 boost::property_tree::read_json(local_stream, pt);
 
@@ -261,10 +256,9 @@ int main(int argc, char** argv) {
                     msgs_queue.erase(index);
                 }
             } catch (...) {
-                std::cout << "ERROR: " << data << std::endl;
-//                data_buf = data;
+                data_buf = data;
             }
-//        }
+        }
 
         if (done && s != NATS_OK)
                 break;
