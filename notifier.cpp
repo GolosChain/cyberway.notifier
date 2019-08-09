@@ -7,15 +7,12 @@
 #include <fstream>
 
 #include <map>
-#include <deque>
 #include <tuple>
 #include <vector>
-#include <thread>
-
-
 
 #include <boost/asio.hpp>
-#include <boost/algorithm/string.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/json_parser.hpp>
 
 static const char* usage =
     "-txt           text to send (default is 'hello')\n";
@@ -47,7 +44,6 @@ struct message final {
 
 
 stanConnOptions* connOpts = nullptr;
-
 std::vector<uint64_t> bad_msgs_queue;
 std::map<uint64_t, message> msgs_queue;
 
@@ -133,49 +129,15 @@ static void connectionLostCB(stanConnection *sc, const char *errTxt, void *closu
     std::cout << "Connection lost: " << errTxt << std::endl;
 }
 
-void test(std::deque<std::string>* v_data) {
-    std::string data = "";
-    while (true) {
-        if (close_thread)
-            break;
+void test() {
 
-        boost::asio::streambuf buf;
-        boost::system::error_code error;
-        auto len = boost::asio::read(socket_stream, buf, boost::asio::transfer_at_least(1), error);
-        if( error && error != boost::asio::error::eof ) {
-            std::cout << "receive failed: " << error.message() << std::endl;
-            nats_Sleep(50);
-            continue;
-        }
-
-        auto temp = std::string(const_cast<char *>( boost::asio::buffer_cast<const char*>(buf.data()) ));
-        temp.erase( std::remove_if(temp.begin(), temp.end(), [&](const char el) {
-                if ((int)el < 32 && (int)el != 10) {
-                    return true;
-                }
-
-                return false;
-            }
-        ) , temp.end() );
-
-        data += temp;
-        std::vector<std::string> local_v_data;
-        boost::split(local_v_data, data, boost::algorithm::is_any_of("\n"));
-
-        data = local_v_data.back(); // TODO if string is not finished
-        local_v_data.pop_back(); // TODO erase last element, because do not finished
-
-        if(local_v_data.size() == 0) // TODO if vector size = 0, then string not finished
-            continue;
-
-        for (auto item : local_v_data)
-            v_data->push_front(item);
-    }
 }
 
 int main(int argc, char** argv) {
     try {
         socket_stream.connect(ep);
+        if (!socket_stream.native_non_blocking())
+                socket_stream.native_non_blocking(true);
     } catch (const boost::system::system_error &err) {
         std::cout << "failed to connect to notifier socket: " << err.what() << std::endl;
         throw;
@@ -205,7 +167,7 @@ int main(int argc, char** argv) {
     }
     stanConnection* sc = nullptr;
     if (s == NATS_OK) {
-        s = stanConnection_Connect(&sc, cluster, clientID, connOpts);        
+        s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
     }
     natsOptions_Destroy(opts);
 
@@ -235,10 +197,7 @@ int main(int argc, char** argv) {
         lambda_send_message((void*)item.first, item.second);
     }
 
-//    std::string data = "";
-    std::deque<std::string> v_data;
-    std::thread th(test, &v_data);
-
+    std::string data_buf = "";
     while (s == NATS_OK) {
         while (bad_msgs_queue.size()) {
             if (s != NATS_OK)
@@ -248,24 +207,62 @@ int main(int argc, char** argv) {
             lambda_send_message((void*)it->first, it->second);
             bad_msgs_queue.pop_back();
         }
-        while (v_data.size()) {
-            auto item = v_data.back(); // TODO if string is not finished
-            v_data.pop_back(); // TODO erase last element, because do not finished
-            if (print)
-                std::cout << item << std::endl;
 
-            uint64_t index = msgs_queue.size() ? msgs_queue.rbegin()->first + 1 : msgs_queue.size();
-            auto [it, status] = msgs_queue.insert({ index, {get_subject(item), item} });
-            const auto& msg = it->second;
+        boost::asio::streambuf buf;
+        boost::system::error_code error;
+        boost::asio::read_until(socket_stream, buf, "\n", error);
 
-            lambda_send_message((void*)index, msg);
+        std::stringstream str_stream;
+        auto data_stream = std::string(const_cast<char *>( boost::asio::buffer_cast<const char*>(buf.data()) ));
+        data_stream.erase( std::remove_if(data_stream.begin(), data_stream.end(), [&](const char el) {
+            if ((int)el == 10)
+                return false;
+            else if ((int)el <= 31)
+                return true;
 
-            if (s != NATS_OK)
-                continue;
+            return false;
+        }) , data_stream.end() );
 
-            // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
-            if (s == NATS_OK && !async) {
-                msgs_queue.erase(index);
+        str_stream << data_buf << data_stream;
+        if( error && error != boost::asio::error::eof ) {
+            std::cout << "receive failed: " << error.message() << std::endl;
+            nats_Sleep(50);
+            continue;
+        }
+        data_buf.clear();
+
+        while(!str_stream.eof()) {
+
+            std::string data;
+            std::getline(str_stream, data);
+
+            try {
+                if (data.empty())
+                    break;
+
+                std::stringstream local_stream;
+                local_stream << data;
+                boost::property_tree::ptree pt;
+                boost::property_tree::read_json(local_stream, pt);
+
+                if (print)
+                    std::cout << data << std::endl;
+
+                uint64_t index = msgs_queue.size() ? msgs_queue.rbegin()->first + 1 : msgs_queue.size();
+                auto [it, status] = msgs_queue.insert({ index, {get_subject(data), data} });
+                const auto& msg = it->second;
+
+                lambda_send_message((void*)index, msg);
+
+                if (s != NATS_OK)
+                    continue;
+
+                // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
+                if (s == NATS_OK && !async) {
+                    msgs_queue.erase(index);
+                }
+            } catch (...) {
+                data_buf = data;
             }
         }
 
@@ -277,10 +274,6 @@ int main(int argc, char** argv) {
             continue;
         }
     }
-
-
-    close_thread = true;
-    th.join();
 
     stanConnOptions_Destroy(connOpts);
     stanConnection_Close(sc);
