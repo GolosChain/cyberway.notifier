@@ -27,7 +27,6 @@ struct myPubMsgInfo {
 };
 
 static volatile bool done = false;
-static volatile bool close_thread = false;
 const std::string backup_file = "/queue/backup.txt";
 const std::string DEFAULT_SOCKET_NAME = "/queue/msg.sock";
 
