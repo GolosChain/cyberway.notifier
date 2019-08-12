@@ -204,16 +204,16 @@ int main(int argc, char** argv) {
         std::istream data_stream(&socket_buf);
         std::getline(data_stream, msg.data);
 
-        try {
-            // json validating
-            std::stringstream local_stream;
-            local_stream << msg.data;
-            boost::property_tree::ptree pt;
-            boost::property_tree::read_json(local_stream, pt);
-        } catch (...) {
-            std::cerr << "Data error: " << msg.data << std::endl;
-            throw;
-        }
+//        try {
+//            // json validating
+//            std::stringstream local_stream;
+//            local_stream << msg.data;
+//            boost::property_tree::ptree pt;
+//            boost::property_tree::read_json(local_stream, pt);
+//        } catch (...) {
+//            std::cerr << "Data error: " << msg.data << std::endl;
+//            throw;
+//        }
 
         if (print) {
             std::cout << msg.data << std::endl;
@@ -221,7 +221,12 @@ int main(int argc, char** argv) {
 
         msg.index   = msg_index++;
         msg.subject = get_subject(msg.data);
-        auto result = msgs_queue.emplace(msg.index, std::move(msg));
+        std::pair<message_map::iterator, bool> result;
+        {
+            std::lock_guard<std::mutex> guard(msgs_mutex);
+            result = msgs_queue.emplace(msg.index, std::move(msg));
+        }
+
         if (s == NATS_OK) {
             s = send_nats_message(sc, connOpts, result.first->second);
             if (s != NATS_OK || done) {
