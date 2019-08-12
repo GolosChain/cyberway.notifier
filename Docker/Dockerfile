@@ -5,6 +5,7 @@ ARG branch=master
 ARG compiletype=RelWithDebInfo
 
 RUN cd /opt && wget https://github.com/nats-io/cnats/archive/v1.8.0.tar.gz && tar -xzf v1.8.0.tar.gz \
+    && ln -s /opt/nats.c-1.8.0 /opt/nats.c \
     && cd nats.c-1.8.0 && mkdir build && cd ./build && cmake -DCMAKE_BUILD_TYPE=$compiletype .. && make && make install
 
 RUN echo "/opt/cnats-1.8.0/pbuf/lib/linux/" > /etc/ld.so.conf.d/protobuf-c.conf && ldconfig

@@ -5,38 +5,34 @@
 #include <memory>
 #include <signal.h>
 #include <fstream>
+
 #include <map>
 #include <tuple>
 #include <vector>
+#include <mutex>
 
-static const char* usage =
-    "-txt           text to send (default is 'hello')\n";
-
-struct myPubMsgInfo {
-    const char* payload;
-    int         size;
-    char        ID[30];
-};
+#include <boost/asio.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/json_parser.hpp>
 
 static volatile bool done = false;
 const std::string backup_file = "/queue/backup.txt";
-// natsOptions* opts   = NULL;
-// const char* cluster    = "cyberway";
-// const char* clientID   = "notifier";
-// const char* subj   = "foo";
-// const char* txt    = "hello";
+const std::string DEFAULT_SOCKET_NAME = "/queue/msg.sock";
 
+boost::asio::io_service io_service;
+boost::asio::local::stream_protocol::endpoint ep(DEFAULT_SOCKET_NAME);
+boost::asio::local::stream_protocol::socket socket_stream(io_service);
 
 struct message final {
+    uint64_t    index;
     std::string subject;
     std::string data;
 }; // struct message
 
+using message_map = std::map<uint64_t, message>;
 
-stanConnOptions* connOpts = nullptr;
-
-std::vector<uint64_t> bad_msgs_queue;
-std::map<uint64_t, message> msgs_queue;
+message_map msgs_queue;
+std::mutex  msgs_mutex; // Protect queue from different threads
 
 std::string get_subject(const std::string& data) {
     std::string subject;
@@ -55,42 +51,28 @@ std::string get_subject(const std::string& data) {
     return subject;
 }
 
-bool is_file_empty(std::ifstream& file) {
-    return file.tellg() == std::ifstream::traits_type::eof();
-}
+message_map fill_backup_msgs() {
+    message_map queue;
 
-void fill_backup_msgs() {
     std::ifstream backup(backup_file);
-    if (backup.is_open()) {
-        if (is_file_empty(backup))
-            return;
+    if (!backup.is_open()) {
+        return queue;
+    }
 
-        for (auto [i, line_data, line_subject] = std::tuple<uint64_t, std::string, std::string>{0, "", ""};
-             std::getline(backup, line_subject), std::getline(backup, line_data); i++) {
-            msgs_queue.insert({ i, {line_subject, line_data} });
+    if (backup.tellg() == std::ifstream::traits_type::eof()) {
+        return queue;
+    }
+
+    for (uint64_t i = 0; ; ++i) {
+        message msg;
+        if (!std::getline(backup, msg.subject) || !std::getline(backup, msg.data)) {
+            break;
         }
-        backup.close();
-        std::remove(backup_file.c_str());
+        queue.emplace(i, std::move(msg));
     }
-}
 
-static void _publish_ack_cb(const char* guid, const char* error, void* closure) {
-    // TODO: delete object from waiting list, so we can check if some object didn't published for a long time
-    //std::cout << "#Ack#, " << guid << std::endl;
-    // myPubMsgInfo* pubMsg = (myPubMsgInfo*)closure;
-    // printf("Ack handler for message ID=%s Data=%.*s GUID=%s - ", pubMsg->ID, pubMsg->size, pubMsg->payload, guid);
-
-    if (error != NULL) {
-        std::cout << "Error: " << error << std::endl;
-        bad_msgs_queue.push_back((uint64_t)closure);
-        done = true;    // TODO: locking
-    } else {
-        auto index = (uint64_t)closure;
-        msgs_queue.erase(index);
-    }
-    // free(pubMsg);    // This is a good place to free the pubMsg info since we no longer need it
-    // Notify the main thread that we are done. This is not the proper way and you should use some locking.
-    // done = true;
+    backup.close();
+    return queue;
 }
 
 static void sigusr1_handler(int signum) {
@@ -109,27 +91,64 @@ void create_backup_file() {
 }
 
 static void sig_int_term_handler(int signum) {
-    if (signum == SIGINT)
-        std::cout << "Interrupt signal (" << signum << ") received." << std::endl;
-    else if (signum == SIGTERM)
-        std::cout << "Termination signal (" << signum << ") received." << std::endl;
+    if (signum == SIGINT) {
+        std::cerr << "Interrupt signal (" << signum << ") received." << std::endl;
+    } else if (signum == SIGTERM) {
+        std::cerr << "Termination signal (" << signum << ") received." << std::endl;
+    }
     done = true;
 }
 
-static void connectionLostCB(stanConnection *sc, const char *errTxt, void *closure) {
-    std::cout << "Connection lost: " << errTxt << std::endl;
+static void _nats_publish_ack_cb(const char*, const char* error, void* closure) {
+    std::lock_guard<std::mutex> guard(msgs_mutex);
+
+    auto index = (uint64_t)closure;
+    if (error != NULL) {
+        std::cerr << "Nats send error: " << error << std::endl;
+        done = true;
+    } else {
+        msgs_queue.erase(index);
+    }
+}
+
+static void _nats_connection_lost_cb(stanConnection*, const char* errTxt, void*) {
+    std::cerr << "Connection lost: " << errTxt << std::endl;
+}
+
+static natsStatus send_nats_message(stanConnection* sc, stanConnOptions* connOpts, const message& msg) {
+    natsStatus s = NATS_OK;
+
+    for (int i = 0; i < 24 * 1000; ++i) {
+        if (async) {
+            s = stanConnection_PublishAsync(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size(), _nats_publish_ack_cb, (void*)msg.index);
+        } else {
+            s = stanConnection_Publish(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size());
+        }
+
+        if (s == NATS_CONNECTION_CLOSED) {
+            s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
+        }
+
+        if (s == NATS_TIMEOUT) {
+            nats_Sleep(50);
+            continue;
+        }
+        break;
+    }
+
+    return s;
 }
 
 int main(int argc, char** argv) {
-    opts = parseArgs(argc, argv, usage);
-    std::cout << "Sending pipe messages" << std::endl;
+    opts = parseArgs(argc, argv, "");
+    std::cerr << "Sending socket messages" << std::endl;
 
     signal(SIGUSR1, sigusr1_handler);
-    signal(SIGINT, sig_int_term_handler);
+    signal(SIGINT,  sig_int_term_handler);
     signal(SIGTERM, sig_int_term_handler);
 
     // Now create STAN Connection Options and set the NATS Options.
-
+    stanConnOptions* connOpts = nullptr;
     natsStatus s = stanConnOptions_Create(&connOpts);
     if (s == NATS_OK) {
         s = stanConnOptions_SetNATSOptions(connOpts, opts);
@@ -141,81 +160,82 @@ int main(int argc, char** argv) {
         s = stanConnOptions_SetPubAckWait(connOpts, 120 * 1000 /* ms */);
     }
     if (s == NATS_OK) {
-        s = stanConnOptions_SetConnectionLostHandler(connOpts, connectionLostCB, nullptr);
+        s = stanConnOptions_SetConnectionLostHandler(connOpts, _nats_connection_lost_cb, nullptr);
     }
     stanConnection* sc = nullptr;
     if (s == NATS_OK) {
-        s = stanConnection_Connect(&sc, cluster, clientID, connOpts);        
+        s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
     }
-
     natsOptions_Destroy(opts);
 
-    auto lambda_send_message = [&](void* index, const message& msg) {
-        for (int i = 0; i < 24 * 1000; ++i) {
-            if (async) {
-                s = stanConnection_PublishAsync(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size(), _publish_ack_cb, index);
-            } else {
-                s = stanConnection_Publish(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size());
-            }
-
-            if (s == NATS_CONNECTION_CLOSED)
-                s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
-
-            if (s == NATS_TIMEOUT) {
-                nats_Sleep(50);
-                continue;
-            }
-            break;
+    auto backup_queue = fill_backup_msgs();
+    for (const auto& msg: backup_queue) {
+        s = send_nats_message(sc, connOpts, msg.second);
+        if (s != NATS_OK) {
+            return 2;
         }
-    };
+    }
+    std::remove(backup_file.c_str());
 
-    fill_backup_msgs();
-    for (const auto& item : msgs_queue) {
-        if (s != NATS_OK)
-            break;
-        lambda_send_message((void*)item.first, item.second);
+    try {
+        socket_stream.connect(ep);
+        if (socket_stream.native_non_blocking()) {
+            socket_stream.native_non_blocking(false);
+        }
+    } catch (const boost::system::system_error &err) {
+        std::cout << DEFAULT_SOCKET_NAME << std::endl;
+        std::cerr << "Failed to connect to notifier socket: " << err.what() << std::endl;
+        return 1;
     }
 
-    bool warn = false;
-    while (s == NATS_OK) {
-        while (bad_msgs_queue.size()) {
-            if (s != NATS_OK)
-                break;
+    uint64_t msg_index = backup_queue.size();
+    boost::asio::streambuf socket_buf;
+    boost::system::error_code error;
 
-            const auto& it = msgs_queue.find(bad_msgs_queue.back());
-            lambda_send_message((void*)it->first, it->second);
-            bad_msgs_queue.pop_back();
+    for (;;) {
+        boost::asio::read_until(socket_stream, socket_buf, "\n", error);
+        if (error) {
+            // std::cerr << "Receive failed: " << error.message() << std::endl;
+            // nodeos shutdowns
+            break;
         }
 
-        std::string data;
-        std::getline(std::cin, data);
+        message msg;
+        std::istream data_stream(&socket_buf);
+        std::getline(data_stream, msg.data);
 
-        if (done) {
-            if (data.size()) {
-                if (!warn) {
-                    std::cerr << "WARNING! Pipe hasn't empty." << std::endl;
-                    warn = true;
-                }
-            } else
-                break;
+        try {
+            // json validating
+            std::stringstream local_stream;
+            local_stream << msg.data;
+            boost::property_tree::ptree pt;
+            boost::property_tree::read_json(local_stream, pt);
+        } catch (...) {
+            std::cerr << "Data error: " << msg.data << std::endl;
+            throw;
         }
 
-        if (std::cin.eof() && !msgs_queue.size()) {
-            nats_Sleep(50);
-            continue;
-        } else if (print)
-            std::cout << data << std::endl;
-
-        uint64_t index = msgs_queue.size();
-        auto [it, status] = msgs_queue.insert({ index, {get_subject(data), data} });
-        const auto& msg = it->second;
-
-        lambda_send_message((void*)index, msg);
-
-        // Note that if this call fails, then we need to free the pubMsg object here since it won't be passed to the ack handler.
-        if (s == NATS_OK && !async) {
-            msgs_queue.erase(index);
+        if (print) {
+            std::cout << msg.data << std::endl;
         }
+
+        msg.index   = msg_index++;
+        msg.subject = get_subject(msg.data);
+        auto result = msgs_queue.emplace(msg.index, std::move(msg));
+        if (s == NATS_OK) {
+            s = send_nats_message(sc, connOpts, result.first->second);
+            if (s != NATS_OK || done) {
+                std::cerr << "Shutdown" << std::endl;
+                socket_stream.shutdown(socket_stream.shutdown_both, error);
+            } else if (!async) {
+                msgs_queue.erase(result.first->first);
+            }
+        }
+    }
+
+    if (s != NATS_OK) {
+        std::cerr << "Nats error: " << s << " - " << natsStatus_GetText(s) << std::endl;
+        nats_PrintLastErrorStack(stderr);
     }
 
     stanConnOptions_Destroy(connOpts);
@@ -225,8 +245,6 @@ int main(int argc, char** argv) {
     nats_Close();
 
     if (s != NATS_OK) {
-        std::cout << "Error: " << s << " - " << natsStatus_GetText(s) << std::endl;
-        nats_PrintLastErrorStack(stderr);
         create_backup_file();
     }
 
