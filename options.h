@@ -28,7 +28,7 @@ volatile int64_t count   = 0;
 volatile int64_t dropped = 0;
 int64_t          start   = 0;
 volatile int64_t elapsed = 0;
-bool             print   = true;
+bool             print   = false;
 int64_t          timeout = 10000; // 10 seconds.
 
 natsOptions*    opts     = NULL;
