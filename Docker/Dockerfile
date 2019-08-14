@@ -3,6 +3,7 @@ FROM cyberway/builder:$buildtype as builder
 
 ARG branch=master
 ARG compiletype=RelWithDebInfo
+ARG ref=heads/$branch
 
 RUN cd /opt && wget https://github.com/nats-io/cnats/archive/v1.8.0.tar.gz && tar -xzf v1.8.0.tar.gz \
     && ln -s /opt/nats.c-1.8.0 /opt/nats.c \
@@ -10,7 +11,7 @@ RUN cd /opt && wget https://github.com/nats-io/cnats/archive/v1.8.0.tar.gz && ta
 
 RUN echo "/opt/cnats-1.8.0/pbuf/lib/linux/" > /etc/ld.so.conf.d/protobuf-c.conf && ldconfig
 
-ADD https://api.github.com/repos/cyberway/cyberway.notifier/git/refs/heads/$branch /etc/version.json
+ADD https://api.github.com/repos/cyberway/cyberway.notifier/git/refs/$ref /etc/version.json
 
 RUN cd /opt && git clone -b $branch https://github.com/cyberway/cyberway.notifier.git --recursive
 
