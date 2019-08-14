@@ -19,4 +19,4 @@ else
 fi
 
 cd Docker
-docker build -t cyberway/cyberway-notifier:${IMAGETAG} --build-arg=branch=${BRANCHNAME} --build-arg buildtype=${BUILDTYPE} --build-arg compiletype=${COMPILETYPE} --build-arg ref=${REF}.
+docker build -t cyberway/cyberway-notifier:${IMAGETAG} --build-arg=branch=${BRANCHNAME} --build-arg buildtype=${BUILDTYPE} --build-arg compiletype=${COMPILETYPE} --build-arg ref=${REF} .
