@@ -1,4 +1,4 @@
-<img width="400" src="../cyberway/docs/logo.jpg" />
+<img width="400" src="https://github.com/cyberway/cyberway/blob/master/docs/logo.jpg" />
 
 # Cyberway Notifier
 CyberWay Notifier is a component of CyberWay Event Model and it looks like a messenger utility which passes the messages from the Event Engine to NATS. Notifier provides high reliability of the data transfer.
