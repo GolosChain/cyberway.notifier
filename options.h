@@ -10,6 +10,7 @@
 #else
 #include <strings.h>
 #include <signal.h>
+#include <stdlib.h>
 #endif
 
 #define STATS_IN        0x1
@@ -44,6 +45,9 @@ bool        deliverAll  = false;
 bool        deliverLast = true;
 uint64_t    deliverSeq  = 0;
 bool        unsubscribe = false;
+
+int         interval    = 10000; // 10 seconds
+int         attempts    = 1;
 
 static natsStatus printStats(int mode, natsConnection* conn, natsSubscription* sub, natsStatistics* stats) {
     natsStatus  s           = NATS_OK;
@@ -99,6 +103,8 @@ static void printPerf(const char* txt, int64_t count, int64_t start, int64_t ela
 static void printUsageAndExit(const char* progName, const char* usage) {
     printf(
         "\nUsage: %s [options]\n\nThe options are:\n\n"
+        "-i             interval between reconnection attempts (in ms, default is 10000)\n"
+        "-n             number of reconnection attempts (0 is infinity, default is 1)\n"
         "-h             prints the usage\n"
         "-s             server url(s) (list of comma separated nats urls)\n"
         "-tls           use secure (SSL/TLS) connection\n"
@@ -166,6 +172,16 @@ static natsOptions* parseArgs(int argc, char** argv, const char* usage) {
             s = parseUrls(argv[++i], opts);
             if (s == NATS_OK)
                 urlsSet = true;
+        }
+        else if (strcasecmp(argv[i], "-i") == 0) {
+            if (i + 1 == argc)
+                printUsageAndExit(argv[0], usage);
+            interval = atoi(argv[++i]);
+        }
+        else if (strcasecmp(argv[i], "-n") == 0) {
+            if (i + 1 == argc)
+                printUsageAndExit(argv[0], usage);
+            attempts = atoi(argv[++i]);
         }
         else if (strcasecmp(argv[i], "-tls") == 0) {
             s = natsOptions_SetSecure(opts, true);
