@@ -244,13 +244,17 @@ natsStatus getLastCommitBlock(stanConnection *sc, BlockId &commitBlockId, BlockI
 
 
 int main(int argc, char** argv) {
+    bool startup = true, reconnect = false;
+    int attempts = 0;
+
+    startLabel:
+
     opts = parseArgs(argc, argv, "");
     std::cerr << "Sending socket messages" << std::endl;
 
     signal(SIGUSR1, sigusr1_handler);
     signal(SIGINT,  sig_int_term_handler);
     signal(SIGTERM, sig_int_term_handler);
-
     // Now create STAN Connection Options and set the NATS Options.
     stanConnOptions* connOpts = nullptr;
     natsStatus s = stanConnOptions_Create(&connOpts);
@@ -293,14 +297,28 @@ int main(int argc, char** argv) {
         std::cerr << "  LastBlock: " <<   lastBlockId.number << ", " <<   lastBlockId.id << std::endl;
     }
 
-    try {
-        socket_stream.connect(ep);
-        if (socket_stream.native_non_blocking()) {
-            socket_stream.native_non_blocking(false);
+    while (attempts < maxAttempts || maxAttempts == 0) {
+        try {
+            socket_stream.connect(ep);
+            if (socket_stream.native_non_blocking()) {
+                socket_stream.native_non_blocking(false);
+            }
+            startup = false;
+            attempts = 0;
+            break;
+        } catch (const boost::system::system_error &err) {
+            if (startup) {
+                std::cerr << "Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
+                return 1;
+            }
+            std::cerr << "Attempt " << attempts + 1 << ". Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
+            if (attempts == maxAttempts - 1) {
+                std::cerr << "Out of Attempts" << std::endl;
+                return 1;
+            }
+            sleep((float) interval / 1000);
+            attempts++;
         }
-    } catch (const boost::system::system_error &err) {
-        std::cerr << "Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
-        return 1;
     }
 
     uint64_t msg_index = backup_queue.size();
@@ -396,6 +414,9 @@ int main(int argc, char** argv) {
     if (s != NATS_OK) {
         std::cerr << "Nats error: " << s << " - " << natsStatus_GetText(s) << std::endl;
         nats_PrintLastErrorStack(stderr);
+        if (maxAttempts != 1) {
+            reconnect = true;
+        }
     }
 
     stanConnOptions_Destroy(connOpts);
@@ -403,6 +424,11 @@ int main(int argc, char** argv) {
     stanConnection_Destroy(sc);
     nats_Sleep(50);    // To silence reports of memory still in-use with valgrind.
     nats_Close();
+
+    if (reconnect) {
+        std::cerr << "Trying to reconnect..." << std::endl;
+        goto startLabel;
+    }
 
     if (s != NATS_OK) {
         create_backup_file();

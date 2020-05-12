@@ -47,7 +47,7 @@ uint64_t    deliverSeq  = 0;
 bool        unsubscribe = false;
 
 int         interval    = 10000; // 10 seconds
-int         attempts    = 1;
+int         maxAttempts = 1;
 
 static natsStatus printStats(int mode, natsConnection* conn, natsSubscription* sub, natsStatistics* stats) {
     natsStatus  s           = NATS_OK;
@@ -181,7 +181,7 @@ static natsOptions* parseArgs(int argc, char** argv, const char* usage) {
         else if (strcasecmp(argv[i], "-n") == 0) {
             if (i + 1 == argc)
                 printUsageAndExit(argv[0], usage);
-            attempts = atoi(argv[++i]);
+            maxAttempts = atoi(argv[++i]);
         }
         else if (strcasecmp(argv[i], "-tls") == 0) {
             s = natsOptions_SetSecure(opts, true);
