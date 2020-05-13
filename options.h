@@ -175,12 +175,12 @@ static natsOptions* parseArgs(int argc, char** argv, const char* usage) {
         else if (strcasecmp(argv[i], "-interval") == 0) {
             if (i + 1 == argc)
                 printUsageAndExit(argv[0], usage);
-            interval = atoi(argv[++i]);
+            sscanf(argv[++i], "%" PRIu64, &interval);
         }
         else if (strcasecmp(argv[i], "-attempts") == 0) {
             if (i + 1 == argc)
                 printUsageAndExit(argv[0], usage);
-            maxAttempts = atoi(argv[++i]);
+            sscanf(argv[++i], "%" PRIu64, &maxAttempts);
         }
         else if (strcasecmp(argv[i], "-tls") == 0) {
             s = natsOptions_SetSecure(opts, true);
