@@ -45,8 +45,8 @@ bool        deliverLast = true;
 uint64_t    deliverSeq  = 0;
 bool        unsubscribe = false;
 
-int64_t     interval    = 10000; // 10 seconds
-int64_t     maxAttempts = 1;
+uint64_t    interval    = 10000; // 10 seconds
+uint64_t    maxAttempts = 1;
 
 static natsStatus printStats(int mode, natsConnection* conn, natsSubscription* sub, natsStatistics* stats) {
     natsStatus  s           = NATS_OK;
