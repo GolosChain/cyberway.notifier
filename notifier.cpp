@@ -245,194 +245,189 @@ natsStatus getLastCommitBlock(stanConnection *sc, BlockId &commitBlockId, BlockI
 
 int main(int argc, char** argv) {
     bool startup = true, reconnect = false;
-    int attempts = 0;
 
-    startLabel:
+    do {
+        reconnect = false;
+        opts = parseArgs(argc, argv, "");
+        std::cerr << "Sending socket messages" << std::endl;
 
-    opts = parseArgs(argc, argv, "");
-    std::cerr << "Sending socket messages" << std::endl;
-
-    signal(SIGUSR1, sigusr1_handler);
-    signal(SIGINT,  sig_int_term_handler);
-    signal(SIGTERM, sig_int_term_handler);
-    // Now create STAN Connection Options and set the NATS Options.
-    stanConnOptions* connOpts = nullptr;
-    natsStatus s = stanConnOptions_Create(&connOpts);
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetNATSOptions(connOpts, opts);
-    }
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetPings(connOpts, 5 /* seconds */, 24 /* maximum missed pings */);
-    }
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetPubAckWait(connOpts, 120 * 1000 /* ms */);
-    }
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetConnectionLostHandler(connOpts, _nats_connection_lost_cb, nullptr);
-    }
-    stanConnection* sc = nullptr;
-    if (s == NATS_OK) {
-        s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
-    }
-    natsOptions_Destroy(opts);
-
-    auto backup_queue = fill_backup_msgs();
-    for (const auto& msg: backup_queue) {
-        s = send_nats_message(sc, connOpts, msg.second);
-        if (s != NATS_OK) {
-            return 2;
-        }
-    }
-    std::remove(backup_file.c_str());
-
-    BlockId commitBlockId, lastBlockId;
-    {
-        natsStatus s2;
-        std::cerr << "Receve last & commit block from nats" << std::endl;
-        s2 = getLastCommitBlock(sc, commitBlockId, lastBlockId);
-        if (s2 != NATS_OK) {
-            return 2;
-        }
-        std::cerr << "CommitBlock: " << commitBlockId.number << ", " << commitBlockId.id << std::endl;
-        std::cerr << "  LastBlock: " <<   lastBlockId.number << ", " <<   lastBlockId.id << std::endl;
-    }
-
-    while (attempts < maxAttempts || maxAttempts == 0) {
-        try {
-            socket_stream.connect(ep);
-            if (socket_stream.native_non_blocking()) {
-                socket_stream.native_non_blocking(false);
-            }
-            startup = false;
-            attempts = 0;
-            break;
-        } catch (const boost::system::system_error &err) {
-            if (startup) {
-                std::cerr << "Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
-                return 1;
-            }
-            std::cerr << "Attempt " << attempts + 1 << ". Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
-            if (attempts == maxAttempts - 1) {
-                std::cerr << "Out of Attempts" << std::endl;
-                return 1;
-            }
-            sleep((float) interval / 1000);
-            attempts++;
-        }
-    }
-
-    uint64_t msg_index = backup_queue.size();
-    boost::asio::streambuf socket_buf;
-    boost::system::error_code error;
-
-    for (;;) {
-        boost::asio::read_until(socket_stream, socket_buf, "\n", error);
-        if (error) {
-            // std::cerr << "Receive failed: " << error.message() << std::endl;
-            // nodeos shutdowns
-            break;
-        }
-
-        message msg;
-        std::istream data_stream(&socket_buf);
-        std::getline(data_stream, msg.data);
-
-        if (print) {
-            std::cout << msg.data << std::endl;
-        }
-
-        msg.index   = msg_index++;
-        msg.subject = get_subject(msg.data);
-
-        if (lastBlockId.number || commitBlockId.number) {
-            if (msg.subject != "Blocks") {
-                std::cerr << "Invalid message subject '" << msg.subject << "' for synchronize mode" << std::endl;
-                break;
-            }
-
-            namespace pt = boost::property_tree;
-            try {
-                std::stringstream ss(msg.data);
-                pt::ptree root;
-                pt::read_json(ss, root);
-                std::string msg_type = root.get<std::string>("msg_type");
-                std::string id = root.get<std::string>("id");
-                unsigned block_num = (msg_type == "AcceptTrx") ? commitBlockId.number : root.get<unsigned>("block_num");
-
-                if (block_num < commitBlockId.number) continue;
-
-                if (commitBlockId.number && msg_type == "CommitBlock") {
-                    if (block_num == commitBlockId.number) {
-                        if (id != commitBlockId.id) {
-                            std::cerr << "Invalid last commit block in synchronize mode. Expect: " << commitBlockId.id << ", get: " << id << std::endl;
-                            break;
-                        } else {
-                            std::cerr << "Found last commit block in synchronize mode: " << commitBlockId.id << std::endl;
-                            commitBlockId = BlockId();    // Disable check for commit block
-                            continue;
-                        }
-                    } else if (block_num == commitBlockId.number + 1) {
-                        std::cerr << "Continue with next commit block in synchronize mode: " << id << std::endl;
-                        commitBlockId = BlockId();    // Disable check for commit block
-                    } else {
-                        std::cerr << "Invalid commit block_num in synchronize mode. Expect: " << commitBlockId.number << ", get: " << block_num << std::endl;
-                        break;
-                    }
-                }
-
-                if (lastBlockId.number) {
-                    if (block_num > lastBlockId.number + 1) {
-                        std::cerr << "Too large block_num in message for synchronize mode. Last: " << lastBlockId.number << ", current: " << block_num << std::endl;
-                        break;
-                    } else lastBlockId = BlockId();
-                }
-
-            } catch (const pt::ptree_error &err) {
-                std::cerr << "Invalid json in synchronize mode: " << err.what() << std::endl;
-                std::cerr << msg.data << std::endl;
-                break;
-            }
-        }
-
-        std::pair<message_map::iterator, bool> result;
-        {
-            std::lock_guard<std::mutex> guard(msgs_mutex);
-            result = msgs_queue.emplace(msg.index, std::move(msg));
-        }
-
+        signal(SIGUSR1, sigusr1_handler);
+        signal(SIGINT,  sig_int_term_handler);
+        signal(SIGTERM, sig_int_term_handler);
+        // Now create STAN Connection Options and set the NATS Options.
+        stanConnOptions* connOpts = nullptr;
+        natsStatus s = stanConnOptions_Create(&connOpts);
         if (s == NATS_OK) {
-            s = send_nats_message(sc, connOpts, result.first->second);
-            if (s != NATS_OK || done) {
-                std::cerr << "Shutdown" << std::endl;
-                socket_stream.shutdown(socket_stream.shutdown_both, error);
-            } else if (!async) {
-                msgs_queue.erase(result.first->first);
+            s = stanConnOptions_SetNATSOptions(connOpts, opts);
+        }
+        if (s == NATS_OK) {
+            s = stanConnOptions_SetPings(connOpts, 5 /* seconds */, 24 /* maximum missed pings */);
+        }
+        if (s == NATS_OK) {
+            s = stanConnOptions_SetPubAckWait(connOpts, 120 * 1000 /* ms */);
+        }
+        if (s == NATS_OK) {
+            s = stanConnOptions_SetConnectionLostHandler(connOpts, _nats_connection_lost_cb, nullptr);
+        }
+        stanConnection* sc = nullptr;
+        if (s == NATS_OK) {
+            s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
+        }
+        natsOptions_Destroy(opts);
+
+        auto backup_queue = fill_backup_msgs();
+        for (const auto& msg: backup_queue) {
+            s = send_nats_message(sc, connOpts, msg.second);
+            if (s != NATS_OK) {
+                return 2;
             }
         }
-    }
+        std::remove(backup_file.c_str());
 
-    if (s != NATS_OK) {
-        std::cerr << "Nats error: " << s << " - " << natsStatus_GetText(s) << std::endl;
-        nats_PrintLastErrorStack(stderr);
-        if (maxAttempts != 1) {
-            reconnect = true;
+        BlockId commitBlockId, lastBlockId;
+        {
+            natsStatus s2;
+            std::cerr << "Receve last & commit block from nats" << std::endl;
+            s2 = getLastCommitBlock(sc, commitBlockId, lastBlockId);
+            if (s2 != NATS_OK) {
+                return 2;
+            }
+            std::cerr << "CommitBlock: " << commitBlockId.number << ", " << commitBlockId.id << std::endl;
+            std::cerr << "  LastBlock: " <<   lastBlockId.number << ", " <<   lastBlockId.id << std::endl;
+        }
+
+        for (uint64_t attempts = 0; attempts < maxAttempts; attempts++) {
+            try {
+                socket_stream.connect(ep);
+                if (socket_stream.native_non_blocking()) {
+                    socket_stream.native_non_blocking(false);
+                }
+                startup = false;
+                break;
+            } catch (const boost::system::system_error &err) {
+                if (startup) {
+                    std::cerr << "Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
+                    return 1;
+                }
+                std::cerr << "Attempt " << attempts + 1 << ". Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
+                if (attempts == maxAttempts - 1) {
+                    std::cerr << "Out of Attempts" << std::endl;
+                    return 1;
+                }
+                sleep((float) interval / 1000);
+            }
+        }
+
+        uint64_t msg_index = backup_queue.size();
+        boost::asio::streambuf socket_buf;
+        boost::system::error_code error;
+
+        for (;;) {
+            boost::asio::read_until(socket_stream, socket_buf, "\n", error);
+            if (error) {
+                // std::cerr << "Receive failed: " << error.message() << std::endl;
+                // nodeos shutdowns
+                break;
+            }
+
+            message msg;
+            std::istream data_stream(&socket_buf);
+            std::getline(data_stream, msg.data);
+
+            if (print) {
+                std::cout << msg.data << std::endl;
+            }
+
+            msg.index   = msg_index++;
+            msg.subject = get_subject(msg.data);
+
+            if (lastBlockId.number || commitBlockId.number) {
+                if (msg.subject != "Blocks") {
+                    std::cerr << "Invalid message subject '" << msg.subject << "' for synchronize mode" << std::endl;
+                    break;
+                }
+
+                namespace pt = boost::property_tree;
+                try {
+                    std::stringstream ss(msg.data);
+                    pt::ptree root;
+                    pt::read_json(ss, root);
+                    std::string msg_type = root.get<std::string>("msg_type");
+                    std::string id = root.get<std::string>("id");
+                    unsigned block_num = (msg_type == "AcceptTrx") ? commitBlockId.number : root.get<unsigned>("block_num");
+
+                    if (block_num < commitBlockId.number) continue;
+
+                    if (commitBlockId.number && msg_type == "CommitBlock") {
+                        if (block_num == commitBlockId.number) {
+                            if (id != commitBlockId.id) {
+                                std::cerr << "Invalid last commit block in synchronize mode. Expect: " << commitBlockId.id << ", get: " << id << std::endl;
+                                break;
+                            } else {
+                                std::cerr << "Found last commit block in synchronize mode: " << commitBlockId.id << std::endl;
+                                commitBlockId = BlockId();    // Disable check for commit block
+                                continue;
+                            }
+                        } else if (block_num == commitBlockId.number + 1) {
+                            std::cerr << "Continue with next commit block in synchronize mode: " << id << std::endl;
+                            commitBlockId = BlockId();    // Disable check for commit block
+                        } else {
+                            std::cerr << "Invalid commit block_num in synchronize mode. Expect: " << commitBlockId.number << ", get: " << block_num << std::endl;
+                            break;
+                        }
+                    }
+
+                    if (lastBlockId.number) {
+                        if (block_num > lastBlockId.number + 1) {
+                            std::cerr << "Too large block_num in message for synchronize mode. Last: " << lastBlockId.number << ", current: " << block_num << std::endl;
+                            break;
+                        } else lastBlockId = BlockId();
+                    }
+
+                } catch (const pt::ptree_error &err) {
+                    std::cerr << "Invalid json in synchronize mode: " << err.what() << std::endl;
+                    std::cerr << msg.data << std::endl;
+                    break;
+                }
+            }
+
+            std::pair<message_map::iterator, bool> result;
+            {
+                std::lock_guard<std::mutex> guard(msgs_mutex);
+                result = msgs_queue.emplace(msg.index, std::move(msg));
+            }
+
+            if (s == NATS_OK) {
+                s = send_nats_message(sc, connOpts, result.first->second);
+                if (s != NATS_OK || done) {
+                    std::cerr << "Shutdown" << std::endl;
+                    socket_stream.shutdown(socket_stream.shutdown_both, error);
+                } else if (!async) {
+                    msgs_queue.erase(result.first->first);
+                }
+            }
+        }
+
+        if (s != NATS_OK && !done) {
+            std::cerr << "Nats error: " << s << " - " << natsStatus_GetText(s) << std::endl;
+            nats_PrintLastErrorStack(stderr);
+            if (maxAttempts != 1) {
+                reconnect = true;
+                std::cerr << "Trying to reconnect..." << std::endl;
+            }
+        }
+
+        stanConnOptions_Destroy(connOpts);
+        stanConnection_Close(sc);
+        stanConnection_Destroy(sc);
+        nats_Sleep(50);
+        nats_Close();
+
+        if (!reconnect && s != NATS_OK) {
+            create_backup_file();
         }
     }
-
-    stanConnOptions_Destroy(connOpts);
-    stanConnection_Close(sc);
-    stanConnection_Destroy(sc);
-    nats_Sleep(50);    // To silence reports of memory still in-use with valgrind.
-    nats_Close();
-
-    if (reconnect) {
-        std::cerr << "Trying to reconnect..." << std::endl;
-        goto startLabel;
-    }
-
-    if (s != NATS_OK) {
-        create_backup_file();
-    }
+    while (reconnect);
 
     return 0;
 }
