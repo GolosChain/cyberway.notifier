@@ -245,7 +245,6 @@ natsStatus getLastCommitBlock(stanConnection *sc, BlockId &commitBlockId, BlockI
 
 int main(int argc, char** argv) {
     bool startup = true, reconnect = false;
-<<<<<<< HEAD
 
     do {
         reconnect = false;
@@ -260,49 +259,10 @@ int main(int argc, char** argv) {
         natsStatus s = stanConnOptions_Create(&connOpts);
         if (s == NATS_OK) {
             s = stanConnOptions_SetNATSOptions(connOpts, opts);
-=======
-    int attempts = 0;
-
-    startLabel:
-
-    opts = parseArgs(argc, argv, "");
-    std::cerr << "Sending socket messages" << std::endl;
-
-    signal(SIGUSR1, sigusr1_handler);
-    signal(SIGINT,  sig_int_term_handler);
-    signal(SIGTERM, sig_int_term_handler);
-    // Now create STAN Connection Options and set the NATS Options.
-    stanConnOptions* connOpts = nullptr;
-    natsStatus s = stanConnOptions_Create(&connOpts);
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetNATSOptions(connOpts, opts);
-    }
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetPings(connOpts, 5 /* seconds */, 24 /* maximum missed pings */);
-    }
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetPubAckWait(connOpts, 120 * 1000 /* ms */);
-    }
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetConnectionLostHandler(connOpts, _nats_connection_lost_cb, nullptr);
-    }
-    stanConnection* sc = nullptr;
-    if (s == NATS_OK) {
-        s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
-    }
-    natsOptions_Destroy(opts);
-
-    auto backup_queue = fill_backup_msgs();
-    for (const auto& msg: backup_queue) {
-        s = send_nats_message(sc, connOpts, msg.second);
-        if (s != NATS_OK) {
-            return 2;
->>>>>>> 22fd3554424ff9530d02852615666194a26e88cb
         }
         if (s == NATS_OK) {
             s = stanConnOptions_SetPings(connOpts, 5 /* seconds */, 24 /* maximum missed pings */);
         }
-<<<<<<< HEAD
         if (s == NATS_OK) {
             s = stanConnOptions_SetPubAckWait(connOpts, 120 * 1000 /* ms */);
         }
@@ -314,39 +274,6 @@ int main(int argc, char** argv) {
             s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
         }
         natsOptions_Destroy(opts);
-=======
-        std::cerr << "CommitBlock: " << commitBlockId.number << ", " << commitBlockId.id << std::endl;
-        std::cerr << "  LastBlock: " <<   lastBlockId.number << ", " <<   lastBlockId.id << std::endl;
-    }
-
-    while (attempts < maxAttempts || maxAttempts == 0) {
-        try {
-            socket_stream.connect(ep);
-            if (socket_stream.native_non_blocking()) {
-                socket_stream.native_non_blocking(false);
-            }
-            startup = false;
-            attempts = 0;
-            break;
-        } catch (const boost::system::system_error &err) {
-            if (startup) {
-                std::cerr << "Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
-                return 1;
-            }
-            std::cerr << "Attempt " << attempts + 1 << ". Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
-            if (attempts == maxAttempts - 1) {
-                std::cerr << "Out of Attempts" << std::endl;
-                return 1;
-            }
-            sleep((float) interval / 1000);
-            attempts++;
-        }
-    }
-
-    uint64_t msg_index = backup_queue.size();
-    boost::asio::streambuf socket_buf;
-    boost::system::error_code error;
->>>>>>> 22fd3554424ff9530d02852615666194a26e88cb
 
         auto backup_queue = fill_backup_msgs();
         for (const auto& msg: backup_queue) {
@@ -489,18 +416,6 @@ int main(int argc, char** argv) {
                 std::cerr << "Trying to reconnect..." << std::endl;
             }
         }
-<<<<<<< HEAD
-=======
-    }
-
-    if (s != NATS_OK) {
-        std::cerr << "Nats error: " << s << " - " << natsStatus_GetText(s) << std::endl;
-        nats_PrintLastErrorStack(stderr);
-        if (maxAttempts != 1) {
-            reconnect = true;
-        }
-    }
->>>>>>> 22fd3554424ff9530d02852615666194a26e88cb
 
         stanConnOptions_Destroy(connOpts);
         stanConnection_Close(sc);
@@ -508,19 +423,9 @@ int main(int argc, char** argv) {
         nats_Sleep(50);
         nats_Close();
 
-<<<<<<< HEAD
         if (!reconnect && s != NATS_OK) {
             create_backup_file();
         }
-=======
-    if (reconnect) {
-        std::cerr << "Trying to reconnect..." << std::endl;
-        goto startLabel;
-    }
-
-    if (s != NATS_OK) {
-        create_backup_file();
->>>>>>> 22fd3554424ff9530d02852615666194a26e88cb
     }
     while (reconnect);
 
