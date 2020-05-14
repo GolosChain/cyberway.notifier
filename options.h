@@ -175,12 +175,12 @@ static natsOptions* parseArgs(int argc, char** argv, const char* usage) {
         else if (strcasecmp(argv[i], "-interval") == 0) {
             if (i + 1 == argc)
                 printUsageAndExit(argv[0], usage);
-            atol(argv[++i]);
+            interval = atol(argv[++i]);
         }
         else if (strcasecmp(argv[i], "-attempts") == 0) {
             if (i + 1 == argc)
                 printUsageAndExit(argv[0], usage);
-            atol(argv[++i]);
+            maxAttempts = atol(argv[++i]);
         }
         else if (strcasecmp(argv[i], "-tls") == 0) {
             s = natsOptions_SetSecure(opts, true);

@@ -24,6 +24,9 @@ boost::asio::io_service io_service;
 boost::asio::local::stream_protocol::endpoint ep(DEFAULT_SOCKET_NAME);
 boost::asio::local::stream_protocol::socket socket_stream(io_service);
 
+static volatile uint64_t attempts = 0;
+static volatile bool startup = true, working;
+
 struct message final {
     uint64_t    index;
     std::string subject;
@@ -114,6 +117,17 @@ static void _nats_publish_ack_cb(const char*, const char* error, void* closure) 
 
 static void _nats_connection_lost_cb(stanConnection*, const char* errTxt, void*) {
     std::cerr << "Connection lost: " << errTxt << std::endl;
+    if (!startup) {
+        if (attempts < maxAttempts || !maxAttempts) {
+            attempts ++;
+            std::cerr << "Trying to reconnect... Attempt " << attempts << " of " << maxAttempts << "." << std::endl;
+            working = true;
+        }
+        else {
+            std::cerr << "Out of attempts." << std::endl;
+            working = false;
+        }
+    }
 }
 
 static natsStatus send_nats_message(stanConnection* sc, stanConnOptions* connOpts, const message& msg) {
@@ -242,81 +256,7 @@ natsStatus getLastCommitBlock(stanConnection *sc, BlockId &commitBlockId, BlockI
     return NATS_OK;
 }
 
-int processing(int argc, char** argv, bool startup) {
-    bool reconnect = false;
-    opts = parseArgs(argc, argv, "");
-    std::cerr << "Sending socket messages" << std::endl;
-
-    signal(SIGUSR1, sigusr1_handler);
-    signal(SIGINT,  sig_int_term_handler);
-    signal(SIGTERM, sig_int_term_handler);
-    // Now create STAN Connection Options and set the NATS Options.
-    stanConnOptions* connOpts = nullptr;
-    natsStatus s = stanConnOptions_Create(&connOpts);
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetNATSOptions(connOpts, opts);
-    }
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetPings(connOpts, 5 /* seconds */, 24 /* maximum missed pings */);
-    }
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetPubAckWait(connOpts, 120 * 1000 /* ms */);
-    }
-    if (s == NATS_OK) {
-        s = stanConnOptions_SetConnectionLostHandler(connOpts, _nats_connection_lost_cb, nullptr);
-    }
-    stanConnection* sc = nullptr;
-    if (s == NATS_OK) {
-        s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
-    }
-    natsOptions_Destroy(opts);
-
-    auto backup_queue = fill_backup_msgs();
-    for (const auto& msg: backup_queue) {
-        s = send_nats_message(sc, connOpts, msg.second);
-        if (s != NATS_OK) {
-            return 2;
-        }
-    }
-    std::remove(backup_file.c_str());
-
-    BlockId commitBlockId, lastBlockId;
-    {
-        natsStatus s2;
-        std::cerr << "Receve last & commit block from nats" << std::endl;
-        s2 = getLastCommitBlock(sc, commitBlockId, lastBlockId);
-        if (s2 != NATS_OK) {
-            return 2;
-        }
-        std::cerr << "CommitBlock: " << commitBlockId.number << ", " << commitBlockId.id << std::endl;
-        std::cerr << "  LastBlock: " <<   lastBlockId.number << ", " <<   lastBlockId.id << std::endl;
-    }
-
-    for (uint64_t attempts = 0; attempts < maxAttempts; attempts++) {
-        try {
-            socket_stream.connect(ep);
-            if (socket_stream.native_non_blocking()) {
-                socket_stream.native_non_blocking(false);
-            }
-            break;
-        } catch (const boost::system::system_error &err) {
-            if (startup) {
-                std::cerr << "Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
-                return 1;
-            }
-            std::cerr << "Attempt " << attempts + 1 << ". Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
-            if (attempts == maxAttempts - 1) {
-                std::cerr << "Out of Attempts" << std::endl;
-                return 1;
-            }
-            sleep((float) interval / 1000);
-        }
-    }
-
-    uint64_t msg_index = backup_queue.size();
-    boost::asio::streambuf socket_buf;
-    boost::system::error_code error;
-
+void processing(boost::asio::streambuf &socket_buf, boost::system::error_code &error, uint64_t &msg_index, BlockId &lastBlockId, BlockId &commitBlockId, natsStatus &s, stanConnection* &sc, stanConnOptions* &connOpts) {
     for (;;) {
         boost::asio::read_until(socket_stream, socket_buf, "\n", error);
         if (error) {
@@ -401,33 +341,96 @@ int processing(int argc, char** argv, bool startup) {
                 msgs_queue.erase(result.first->first);
             }
         }
-    }
 
-    if (s != NATS_OK && !done) {
-        std::cerr << "Nats error: " << s << " - " << natsStatus_GetText(s) << std::endl;
-        nats_PrintLastErrorStack(stderr);
-        if (maxAttempts != 1) {
-            reconnect = true;
-            std::cerr << "Trying to reconnect..." << std::endl;
-        }
-    }
-
-    stanConnOptions_Destroy(connOpts);
-    stanConnection_Close(sc);
-    stanConnection_Destroy(sc);
-    nats_Sleep(50);
-    nats_Close();
-
-    if (!reconnect && s != NATS_OK) {
-        create_backup_file();
-    }
-
-    if (reconnect) {
-        return processing(argc, argv, false);
+        startup = false;
+        attempts = 0;
     }
 }
 
 
 int main(int argc, char** argv) {
-    return processing(argc, argv, true);
+    opts = parseArgs(argc, argv, "");
+    
+    std::cerr << "Sending socket messages" << std::endl;
+
+    signal(SIGUSR1, sigusr1_handler);
+    signal(SIGINT,  sig_int_term_handler);
+    signal(SIGTERM, sig_int_term_handler);
+
+    // Now create STAN Connection Options and set the NATS Options.
+    stanConnOptions* connOpts = nullptr;
+    natsStatus s = stanConnOptions_Create(&connOpts);
+    if (s == NATS_OK) {
+        s = stanConnOptions_SetNATSOptions(connOpts, opts);
+    }
+    if (s == NATS_OK) {
+        s = stanConnOptions_SetPings(connOpts, 5 /* seconds */, 24 /* maximum missed pings */);
+    }
+    if (s == NATS_OK) {
+        s = stanConnOptions_SetPubAckWait(connOpts, 120 * 1000 /* ms */);
+    }
+    if (s == NATS_OK) {
+        s = stanConnOptions_SetConnectionLostHandler(connOpts, _nats_connection_lost_cb, nullptr);
+    }
+    stanConnection* sc = nullptr;
+    if (s == NATS_OK) {
+        s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
+    }
+    natsOptions_Destroy(opts);
+
+    auto backup_queue = fill_backup_msgs();
+    for (const auto& msg: backup_queue) {
+        s = send_nats_message(sc, connOpts, msg.second);
+        if (s != NATS_OK) {
+            return 2;
+        }
+    }
+    std::remove(backup_file.c_str());
+
+    BlockId commitBlockId, lastBlockId;
+    {
+        natsStatus s2;
+        std::cerr << "Receve last & commit block from nats" << std::endl;
+        s2 = getLastCommitBlock(sc, commitBlockId, lastBlockId);
+        if (s2 != NATS_OK) {
+            return 2;
+        }
+        std::cerr << "CommitBlock: " << commitBlockId.number << ", " << commitBlockId.id << std::endl;
+        std::cerr << "  LastBlock: " <<   lastBlockId.number << ", " <<   lastBlockId.id << std::endl;
+    }
+
+    try {
+        socket_stream.connect(ep);
+        if (socket_stream.native_non_blocking()) {
+            socket_stream.native_non_blocking(false);
+        }
+    } catch (const boost::system::system_error &err) {
+        std::cerr << "Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
+        return 1;
+    }
+
+    uint64_t msg_index = backup_queue.size();
+    boost::asio::streambuf socket_buf;
+    boost::system::error_code error;
+
+    do {
+        processing(socket_buf, error, msg_index, lastBlockId, commitBlockId, s, sc, connOpts);
+    }
+    while(working);
+
+    if (s != NATS_OK) {
+        std::cerr << "Nats error: " << s << " - " << natsStatus_GetText(s) << std::endl;
+        nats_PrintLastErrorStack(stderr);
+    }
+
+    stanConnOptions_Destroy(connOpts);
+    stanConnection_Close(sc);
+    stanConnection_Destroy(sc);
+    nats_Sleep(50);    // To silence reports of memory still in-use with valgrind.
+    nats_Close();
+
+    if (s != NATS_OK) {
+        create_backup_file();
+    }
+    return 0;
 }
