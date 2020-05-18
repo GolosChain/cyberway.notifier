@@ -120,7 +120,11 @@ static void _nats_connection_lost_cb(stanConnection*, const char* errTxt, void*)
     if (!startup) {
         if (attempts < maxAttempts || !maxAttempts) {
             attempts ++;
-            std::cerr << "Trying to reconnect... Attempt " << attempts << " of " << maxAttempts << "." << std::endl;
+            if (!maxAttempts)
+                std::cerr << "Trying to reconnect... Attempt " << attempts << "." << std::endl;
+            else
+                std::cerr << "Trying to reconnect... Attempt " << attempts << " of " << maxAttempts << "." << std::endl;
+            sleep(attempts);
             working = true;
         }
         else {
