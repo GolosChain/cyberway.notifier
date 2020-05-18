@@ -260,7 +260,7 @@ natsStatus getLastCommitBlock(stanConnection *sc, BlockId &commitBlockId, BlockI
     return NATS_OK;
 }
 
-void processing(boost::asio::streambuf &socket_buf, boost::system::error_code &error, uint64_t &msg_index, BlockId &lastBlockId, BlockId &commitBlockId, natsStatus &s, stanConnection* &sc, stanConnOptions* &connOpts) {
+void processing(boost::asio::streambuf &socket_buf, boost::system::error_code &error, uint64_t &msg_index, BlockId &lastBlockId, BlockId &commitBlockId, natsStatus &s, stanConnection* sc, stanConnOptions* connOpts) {
     for (;;) {
         boost::asio::read_until(socket_stream, socket_buf, "\n", error);
         if (error) {
