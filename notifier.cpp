@@ -124,7 +124,7 @@ static void _nats_connection_lost_cb(stanConnection*, const char* errTxt, void*)
                 std::cerr << "Trying to reconnect... Attempt " << attempts << "." << std::endl;
             else
                 std::cerr << "Trying to reconnect... Attempt " << attempts << " of " << maxAttempts << "." << std::endl;
-            sleep(attempts);
+            sleep((float) interval / 1000);
             working = true;
         }
         else {
@@ -347,6 +347,7 @@ void processing(boost::asio::streambuf &socket_buf, boost::system::error_code &e
         }
 
         startup = false;
+        working = false;
         attempts = 0;
     }
 }
@@ -395,6 +396,7 @@ int main(int argc, char** argv) {
     {
         natsStatus s2;
         std::cerr << "Receve last & commit block from nats" << std::endl;
+        sleep(5);
         s2 = getLastCommitBlock(sc, commitBlockId, lastBlockId);
         if (s2 != NATS_OK) {
             return 2;
