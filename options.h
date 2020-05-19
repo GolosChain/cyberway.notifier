@@ -112,7 +112,7 @@ static void printUsageAndExit(const char* progName, const char* usage) {
         "-tlshost       server certificate's expected hostname\n"
         "-tlsskip       skip server certificate verification\n"
         "-interval      interval between reconnection attempts (in ms, default is 10000)\n"
-        "-attempts      number of reconnection attempts (0 is infinity, default is 1)\n"
+        "-attempts      number of reconnection attempts (-1 is infinity, default is 1)\n"
         "-subj          subject (default is 'foo')\n"
         "-print         for consumers, print received messages (default is false)\n"
         "%s\n",
