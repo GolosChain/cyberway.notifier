@@ -294,19 +294,19 @@ int main(int argc, char** argv) {
     {
         natsStatus s2;
         std::cerr << "Receve last & commit block from nats" << std::endl;
-        /*s2 = getLastCommitBlock(sc, commitBlockId, lastBlockId);
+        s2 = getLastCommitBlock(sc, commitBlockId, lastBlockId);
         if (s2 != NATS_OK) {
             return 2;
-        }*/
+        }
         std::cerr << "CommitBlock: " << commitBlockId.number << ", " << commitBlockId.id << std::endl;
         std::cerr << "  LastBlock: " <<   lastBlockId.number << ", " <<   lastBlockId.id << std::endl;
     }
 
     try {
-        /*socket_stream.connect(ep);
+        socket_stream.connect(ep);
         if (socket_stream.native_non_blocking()) {
             socket_stream.native_non_blocking(false);
-        }*/
+        }
     } catch (const boost::system::system_error &err) {
         std::cerr << "Failed to connect to notifier socket '" << ep.path() << "': " << err.what() << std::endl;
         return 1;
