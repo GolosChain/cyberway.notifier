@@ -242,7 +242,7 @@ natsStatus getLastCommitBlock(stanConnection *sc, BlockId &commitBlockId, BlockI
     return NATS_OK;
 }
 
-std::pair<message_map::iterator, bool> filterMessage(message msg, BlockId commitBlockId, BlockId lastBlockId, uint8_t code) {
+std::pair<message_map::iterator, bool> filterMessage(message msg, BlockId &commitBlockId, BlockId &lastBlockId, uint8_t code) {
     if (print) {
         std::cout << msg.data << std::endl;
     }
