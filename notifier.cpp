@@ -123,10 +123,6 @@ static natsStatus send_nats_message(stanConnection* sc, stanConnOptions* connOpt
     } else {
         s = stanConnection_Publish(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size());
     }
-
-    if (s == NATS_CONNECTION_CLOSED) {
-        s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
-    }
     return s;
 }
 
