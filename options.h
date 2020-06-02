@@ -45,6 +45,11 @@ bool        deliverLast = true;
 uint64_t    deliverSeq  = 0;
 bool        unsubscribe = false;
 
+uint64_t    interval         = 10000; // 10 seconds
+uint64_t    maxAttempts      = 1;
+uint64_t    reconnectBufSize = 8192; // 8 MB
+
+
 static natsStatus printStats(int mode, natsConnection* conn, natsSubscription* sub, natsStatistics* stats) {
     natsStatus  s           = NATS_OK;
     uint64_t    inMsgs      = 0;
@@ -108,6 +113,9 @@ static void printUsageAndExit(const char* progName, const char* usage) {
         "-tlsciphers    ciphers suite\n"
         "-tlshost       server certificate's expected hostname\n"
         "-tlsskip       skip server certificate verification\n"
+        "-interval      interval between reconnection attempts (in ms, default is 10000)\n"
+        "-attempts      number of reconnection attempts (-1 is infinity, default is 1)\n"
+        "-bufsize    size of reconnect buffer (in bytes, default is 8MB)\n"
         "-subj          subject (default is 'foo')\n"
         "-print         for consumers, print received messages (default is false)\n"
         "%s\n",
@@ -166,6 +174,21 @@ static natsOptions* parseArgs(int argc, char** argv, const char* usage) {
             s = parseUrls(argv[++i], opts);
             if (s == NATS_OK)
                 urlsSet = true;
+        }
+        else if (strcasecmp(argv[i], "-interval") == 0) {
+            if (i + 1 == argc)
+                printUsageAndExit(argv[0], usage);
+            interval = atol(argv[++i]);
+        }
+        else if (strcasecmp(argv[i], "-attempts") == 0) {
+            if (i + 1 == argc)
+                printUsageAndExit(argv[0], usage);
+            maxAttempts = atol(argv[++i]);
+        }
+        else if (strcasecmp(argv[i], "-bufsize") == 0) {
+            if (i + 1 == argc)
+                printUsageAndExit(argv[0], usage);
+            reconnectBufSize = atol(argv[++i]);
         }
         else if (strcasecmp(argv[i], "-tls") == 0) {
             s = natsOptions_SetSecure(opts, true);

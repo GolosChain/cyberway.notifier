@@ -118,25 +118,11 @@ static void _nats_connection_lost_cb(stanConnection*, const char* errTxt, void*)
 
 static natsStatus send_nats_message(stanConnection* sc, stanConnOptions* connOpts, const message& msg) {
     natsStatus s = NATS_OK;
-
-    for (int i = 0; i < 24 * 1000; ++i) {
-        if (async) {
-            s = stanConnection_PublishAsync(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size(), _nats_publish_ack_cb, (void*)msg.index);
-        } else {
-            s = stanConnection_Publish(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size());
-        }
-
-        if (s == NATS_CONNECTION_CLOSED) {
-            s = stanConnection_Connect(&sc, cluster, clientID, connOpts);
-        }
-
-        if (s == NATS_TIMEOUT) {
-            nats_Sleep(50);
-            continue;
-        }
-        break;
+    if (async) {
+        s = stanConnection_PublishAsync(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size(), _nats_publish_ack_cb, (void*)msg.index);
+    } else {
+        s = stanConnection_Publish(sc, msg.subject.c_str(), msg.data.c_str(), msg.data.size());
     }
-
     return s;
 }
 
@@ -265,6 +251,18 @@ int main(int argc, char** argv) {
     }
     if (s == NATS_OK) {
         s = stanConnOptions_SetConnectionLostHandler(connOpts, _nats_connection_lost_cb, nullptr);
+    }
+    if (s == NATS_OK) {
+        s = natsOptions_SetMaxReconnect(opts, maxAttempts);
+    }
+    if (s == NATS_OK) {
+        s = natsOptions_SetReconnectWait(opts, interval);
+    }
+    if (s == NATS_OK) {
+        s = natsOptions_SetReconnectBufSize(opts, reconnectBufSize);
+    }
+    if (s == NATS_OK) {
+        s = natsOptions_SetRetryOnFailedConnect(opts, true, NULL, NULL);
     }
     stanConnection* sc = nullptr;
     if (s == NATS_OK) {
